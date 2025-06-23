@@ -1,4 +1,4 @@
-import { MCPConfig, CompleteIteration, IterationBasicInfo, CRApplication } from './types.js';
+import { MCPConfig, CompleteIteration, IterationBasicInfo, CRApplication, CRApplicationData, UserInfo, AliossAccessIdParams, AliossAccessData } from './types.js';
 import axios from 'axios';
 
 /**
@@ -11,6 +11,48 @@ export class APIManager {
   constructor(config: MCPConfig, authToken: string) {
     this.config = config;
     this.authToken = authToken;
+    
+    // 设置axios响应拦截器
+    this.setupInterceptors();
+  }
+
+  /**
+   * 设置请求和响应拦截器
+   */
+  private setupInterceptors(): void {
+    // 响应拦截器 - 统一错误处理（只处理HTTP错误，不处理业务逻辑错误）
+    axios.interceptors.response.use(
+      (response) => {
+        // 记录成功响应
+        console.log(`✅ API响应成功 [${response.config.method?.toUpperCase()} ${response.config.url}]:`, {
+          status: response.status,
+          data: response.data
+        });
+        return response;
+      },
+      async (error) => {
+        console.error(`❌ API请求错误 [${error.config?.method?.toUpperCase()} ${error.config?.url}]:`, {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          message: error.message
+        });
+        
+        // 只处理HTTP错误和token过期，不处理业务逻辑错误
+        if (error.response) {
+          const res = error.response.data;
+          
+          // token过期处理
+          if (res?.errorCode === 40001) {
+            console.error('🔒 Token已过期，需要重新登录');
+            throw new Error('认证已过期，请重新登录');
+          }
+        }
+        
+        // 对于HTTP错误（4xx, 5xx），直接抛出
+        return Promise.reject(error);
+      }
+    );
   }
 
   /**
@@ -32,8 +74,11 @@ export class APIManager {
       // 可选：验证迭代创建结果
       await this.verifyIterationCreated(iterationId);
       
+      // 数据转换：将CRApplication转换为CRApplicationData
+      const crApplicationData = this.convertToCRApplicationData(iteration.crApplication);
+      
       // 阶段2：创建CR申请单
-      const crResult = await this.createCRApplication(iterationId, iteration.crApplication);
+      const crResult = await this.createCRApplication(iterationId, crApplicationData);
       
       console.log(`✅ CR申请单创建成功，ID: ${crResult.crApplicationId}`);
       
@@ -49,6 +94,46 @@ export class APIManager {
   }
 
   /**
+   * 将CRApplication数据转换为API期望的CRApplicationData格式
+   */
+  private convertToCRApplicationData(crApplication: any): CRApplicationData {
+    const projectInfo = crApplication.projectInfo || {};
+    const componentModules = crApplication.componentModules || [];
+    const functionModules = crApplication.functionModules || [];
+    
+    // 转换组件模块为API格式
+    const componentList = componentModules.map((module: any) => ({
+      name: module.name || '', // 使用name而不是componentName
+      address: module.relativePath || '',
+      auditId: parseInt(module.reviewer) || 0,
+      imgUrl: '' // 暂时为空，待上传图片
+    }));
+    
+    // 转换功能模块为API格式
+    const functionList = functionModules.map((module: any) => ({
+      name: module.name || '', // 功能名称
+      desc: module.description || '', // 功能描述
+      auditId: parseInt(module.reviewer) || 0 // 审核人员ID
+    }));
+    
+    return {
+      reqDocUrl: projectInfo.productDoc || '-',
+      techDocUrl: projectInfo.technicalDoc || '-',
+      projexUrl: projectInfo.projectDashboard || '-',
+      uxDocUrl: projectInfo.designDoc || '-',
+      gitlabUrl: projectInfo.gitProjectUrl || '',
+      gitProjectName: projectInfo.projectName || '',
+      gitlabBranch: projectInfo.developmentBranch || 'main',
+      participantIds: Array.isArray(projectInfo.participants) ? projectInfo.participants.join(',') : '',
+      checkUserIds: Array.isArray(projectInfo.reviewers) ? projectInfo.reviewers.join(',') : '',
+      spendTime: (projectInfo.workHours || 0).toString(),
+      componentList,
+      functionList,
+      sprintId: 0 // 将在createCRApplication中设置
+    };
+  }
+
+  /**
    * 阶段1：创建迭代基础信息
    */
   private async createIteration(basicInfo: IterationBasicInfo): Promise<{
@@ -57,25 +142,34 @@ export class APIManager {
   }> {
     const url = `${this.config.api.baseUrl}${this.config.api.endpoints.createIteration}`;
     
+    // 准备API所需的数据格式
+    const payload = {
+      projectId: 1, // 默认项目ID，可能需要根据实际情况调整
+      name: basicInfo.iterationName, // 迭代名称
+      projectLine: basicInfo.projectLine,
+      releaseTime: basicInfo.onlineTime + ' 00:00:00', // 使用releaseTime而非onlineDate
+      remark: basicInfo.remarks || '' // 使用remark而非description
+    };
+    
+    console.log('📤 发送创建迭代请求:', JSON.stringify(payload, null, 2));
+    
     try {
-      const response = await axios.post(url, basicInfo, {
-        headers: {
-          'Authorization': `Bearer ${this.authToken}`,
-          'Content-Type': 'application/json'
-        }
+      const response = await axios.post(url, payload, {
+        headers: this.getHeaders()
       });
       
+      // 实际返回格式为 { success: boolean, data: { id: number }, errorMsg?: string }
       if (response.data.success) {
         return {
-          iterationId: response.data.iterationId,
+          iterationId: response.data.data.id.toString(),
           success: true
         };
       } else {
-        throw new Error(`创建迭代失败: ${response.data.message}`);
+        throw new Error(`创建迭代失败: ${response.data.errorMsg}`);
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        throw new Error(`API调用失败: ${error.response?.data?.message || error.message}`);
+        throw new Error(`API调用失败: ${error.response?.data?.errorMsg || error.message}`);
       }
       throw error;
     }
@@ -88,11 +182,10 @@ export class APIManager {
     const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getIterationDetail}`;
     
     try {
-      const response = await axios.get(url, {
-        params: { id: iterationId },
-        headers: {
-          'Authorization': `Bearer ${this.authToken}`
-        }
+      const response = await axios.post(url, {
+        sprintId: parseInt(iterationId)
+      }, {
+        headers: this.getHeaders()
       });
       
       if (!response.data.success) {
@@ -109,36 +202,267 @@ export class APIManager {
   /**
    * 阶段2：创建CR申请单
    */
-  private async createCRApplication(iterationId: string, crApplication: CRApplication): Promise<{
+  private async createCRApplication(iterationId: string, crApplication: CRApplicationData): Promise<{
     crApplicationId: string;
     success: boolean;
   }> {
     const url = `${this.config.api.baseUrl}${this.config.api.endpoints.createCRApplication}`;
     
+    // 确保sprintId字段正确设置
     const payload = {
-      iterationId,
-      ...crApplication
+      ...crApplication,
+      sprintId: parseInt(iterationId)
     };
     
     try {
       const response = await axios.post(url, payload, {
+        headers: this.getHeaders()
+      });
+      
+      // 实际返回格式可能是 { success: boolean, data: {} } 或 { success: boolean, data: { crRequestId: number } }
+      if (response.data.success) {
+        // 如果有crRequestId就使用，否则使用sprintId作为标识
+        const crRequestId = response.data.data?.crRequestId || response.data.data?.id || `cr_${iterationId}`;
+        return {
+          crApplicationId: crRequestId.toString(),
+          success: true
+        };
+      } else {
+        throw new Error(`创建CR申请单失败: ${response.data.errorMsg}`);
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`API调用失败: ${error.response?.data?.errorMsg || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取标准请求头
+   */
+  private getHeaders(includeAuth: boolean = true): any {
+    const headers: any = {
+      'Content-Type': 'application/json'
+    };
+    
+    if (includeAuth && this.authToken) {
+      headers['authorization'] = `Bearer ${this.authToken}`;
+    }
+    
+    return headers;
+  }
+
+  /**
+   * 用户登录（不需要认证）
+   */
+  async login(credentials: { username: string; password: string }): Promise<any> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.login}`;
+    
+    try {
+      const response = await axios.post(url, credentials, {
+        headers: this.getHeaders(false) // 登录接口不需要token
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`登录失败: ${error.response?.data?.errorMsg || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取阿里云OSS访问令牌
+   */
+  async getOSSToken(params: AliossAccessIdParams = {}): Promise<{
+    success: boolean;
+    errorMsg?: string;
+    errorCode?: number;
+    data?: AliossAccessData;
+  }> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getOSSToken}`;
+    
+    try {
+      const response = await axios.post(url, params, {
+        headers: this.getHeaders()
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`获取OSS令牌失败: ${error.response?.data?.errorMsg || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取用户列表（参与人员和审核人员）
+   */
+  async getUserList(): Promise<UserInfo[]> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getUserList}`;
+    
+    try {
+      const response = await axios.post(url, {}, {
         headers: {
           'Authorization': `Bearer ${this.authToken}`,
           'Content-Type': 'application/json'
         }
       });
       
-      if (response.data.success) {
-        return {
-          crApplicationId: response.data.crApplicationId,
-          success: true
-        };
+      // 详细输出响应信息用于调试
+      console.log('📊 getUserList API响应:', JSON.stringify({
+        status: response.status,
+        statusText: response.statusText,
+        data: response.data
+      }, null, 2));
+      
+      if (response.data.success || Array.isArray(response.data)) {
+        // 兼容不同的响应格式
+        const userData = response.data.data?.list || response.data.data || response.data;
+        return userData;
       } else {
-        throw new Error(`创建CR申请单失败: ${response.data.message}`);
+        const errorMsg = response.data.message || response.data.errorMsg || response.data.msg || '未知错误';
+        throw new Error(`获取用户列表失败: ${errorMsg} (完整响应: ${JSON.stringify(response.data)})`);
       }
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        throw new Error(`API调用失败: ${error.response?.data?.message || error.message}`);
+        const errorMsg = error.response?.data?.message || error.response?.data?.errorMsg || error.response?.data?.msg || error.message;
+        const responseData = error.response?.data ? JSON.stringify(error.response.data) : '无响应数据';
+        throw new Error(`API调用失败: ${errorMsg} (HTTP ${error.response?.status}) (响应: ${responseData})`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取项目组列表
+   */
+  async getProjectList(): Promise<Array<{id: number, name: string}>> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getProjectList}`;
+    
+    try {
+      const response = await axios.post(url, {}, {
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // 详细输出响应信息用于调试
+      console.log('📊 getProjectList API响应:', JSON.stringify({
+        status: response.status,
+        statusText: response.statusText,
+        data: response.data
+      }, null, 2));
+      
+      if (response.data.success || Array.isArray(response.data)) {
+        // 兼容不同的响应格式
+        const projectData = response.data.data?.list || response.data.data || response.data;
+        return projectData;
+      } else {
+        const errorMsg = response.data.message || response.data.errorMsg || response.data.msg || '未知错误';
+        throw new Error(`获取项目组列表失败: ${errorMsg} (完整响应: ${JSON.stringify(response.data)})`);
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const errorMsg = error.response?.data?.message || error.response?.data?.errorMsg || error.response?.data?.msg || error.message;
+        const responseData = error.response?.data ? JSON.stringify(error.response.data) : '无响应数据';
+        throw new Error(`API调用失败: ${errorMsg} (HTTP ${error.response?.status}) (响应: ${responseData})`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取迭代列表
+   */
+  async getIterationList(params: any = {}): Promise<any> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getIterationList}`;
+    
+    try {
+      const response = await axios.post(url, params, {
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`获取迭代列表失败: ${error.response?.data?.message || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取CR申请单列表
+   */
+  async getCRApplicationList(params: any = {}): Promise<any> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getCRApplicationList}`;
+    
+    try {
+      const response = await axios.post(url, params, {
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`获取CR申请单列表失败: ${error.response?.data?.message || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 获取CR问题列表
+   */
+  async getCRProblemList(params: any = {}): Promise<any> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.getCRProblemList}`;
+    
+    try {
+      const response = await axios.post(url, params, {
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`获取CR问题列表失败: ${error.response?.data?.message || error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * 修改CR申请单状态
+   */
+  async checkCRApplicationStatus(params: any): Promise<any> {
+    const url = `${this.config.api.baseUrl}${this.config.api.endpoints.checkCRApplicationStatus}`;
+    
+    try {
+      const response = await axios.post(url, params, {
+        headers: {
+          'Authorization': `Bearer ${this.authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        throw new Error(`修改CR申请单状态失败: ${error.response?.data?.message || error.message}`);
       }
       throw error;
     }
