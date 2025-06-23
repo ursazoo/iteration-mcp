@@ -32,7 +32,7 @@ import { loadConfig, validateConfig } from './config.js';    // 配置管理
 import { DingTalkAuth } from './dingtalk.js';               // 钉钉认证模块
 import { CacheManager } from './cache.js';                  // 本地缓存管理
 import { APIManager } from './api.js';                      // API调用管理
-import { TokenManager } from './token.js';                  // Token管理模块
+import { ConfigManager } from './config-manager.js';        // 外部配置和Token管理
 import { CompleteIteration } from './types.js';             // 类型定义
 import { GitInfo } from './git-utils.js';                   // Git信息工具
 
@@ -56,8 +56,11 @@ class IterationMCPServer {
   /** 钉钉认证管理器，处理登录和token管理 */
   private dingTalkAuth: DingTalkAuth | null = null;
   
-  /** Token管理器，处理认证token的获取和管理 */
-  private tokenManager: TokenManager;
+  /** 配置管理器，处理外部配置和认证token */
+  private configManager: ConfigManager;
+  
+  /** 会话Token，来自钉钉登录，最高优先级 */
+  private sessionToken: string | null = null;
   
   /** 本地缓存管理器，缓存用户列表、项目线等数据 */
   private cacheManager: CacheManager;
@@ -112,7 +115,7 @@ class IterationMCPServer {
     }
     
     // ==================== 初始化组件 ====================
-    this.tokenManager = new TokenManager();
+    this.configManager = new ConfigManager();
     // 初始化缓存管理器（用于存储用户列表、项目线等数据）
     this.cacheManager = new CacheManager();
     
@@ -285,7 +288,7 @@ class IterationMCPServer {
    */
   private async handleCheckLoginStatus() {
     // 检查会话中是否存在个人Token
-    if (this.tokenManager.hasSessionToken()) {
+    if (this.sessionToken) {
       return {
         content: [{ type: 'text', text: '✅ 您已登录，使用的是个人会话Token。' }]
       };
@@ -293,7 +296,8 @@ class IterationMCPServer {
 
     // 检查是否能找到共享配置文件Token
     try {
-      await this.tokenManager.getToken();
+      // 尝试获取token，但不创建APIManager实例
+      await this.configManager.getToken();
       return {
         content: [{ type: 'text', text: '⚠️ 您当前未登录，将使用共享的配置文件Token。如需使用个人身份操作，请调用 `login_dingtalk`。' }]
       };
@@ -324,7 +328,8 @@ class IterationMCPServer {
       
       if (loginResult.success && loginResult.accessToken) {
         // 登录成功，将个人Token设置到会话中
-        this.tokenManager.setSessionToken(loginResult.accessToken);
+        this.sessionToken = loginResult.accessToken;
+        console.log('🔑 会话Token已设置 (来自钉钉登录)，将优先使用此Token。');
         
         // 清理旧的APIManager实例，以便下次使用新的个人Token
         this.apiManager = null;
@@ -806,16 +811,28 @@ class IterationMCPServer {
     }
   }
 
+  /**
+   * 获取或创建一个经过认证的APIManager实例
+   * 这是所有需要认证的API调用的统一入口
+   */
   private async getAPIManager(): Promise<APIManager> {
     // 如果已有APIManager实例，且其token与当前会话token一致，则直接返回
-    // (这里的逻辑可以更完善，但目前为了简化，每次都重新获取)
+    if (this.apiManager && this.sessionToken) {
+      return this.apiManager;
+    }
 
     console.log('🔧 正在初始化/刷新API管理器...');
-    const token = await this.tokenManager.getToken();
     
-    // 创建或更新APIManager实例
-    this.apiManager = new APIManager(this.config, token);
-    console.log('✅ API管理器已准备就绪');
+    // 优先使用会话Token
+    const token = this.sessionToken || await this.configManager.getToken();
+    const baseUrl = await this.configManager.getBaseUrl();
+    
+    // 将外部配置的baseUrl合并到主配置中
+    const apiConfig = { ...this.config.api, baseUrl };
+    const finalConfig = { ...this.config, api: apiConfig };
+    
+    this.apiManager = new APIManager(finalConfig, token);
+    console.log(`✅ API管理器已准备就绪 (API aBase: ${baseUrl})`);
     
     return this.apiManager;
   }

@@ -50,6 +50,61 @@
 3. 登录成功后，使用 `create_iteration` 开始4步交互式流程
 4. 使用 `submit_complete_iteration` 提交完整的迭代和CR申请单
 
+## 👥 使用者指南（同事配置）
+
+为了在你的本地环境中使用此MCP工具，请按照以下步骤进行一次性配置。
+
+### 1. 环境准备
+
+- **安装 Node.js**: 请确保你的电脑上已安装 Node.js (推荐LTS版本)。`npx`是Node.js自带的工具，我们需要它来运行此MCP工具。
+  - 你可以通过在终端运行 `node -v` 来检查是否已安装。
+
+### 2. 创建全局配置文件
+
+这是最重要的一步，你需要创建一个全局配置文件来存放你的个人认证Token和API地址。
+
+- **创建文件**:
+  - 在你的**用户主目录**下，创建一个名为 `mcp-config.json` 的文件。
+    - **macOS/Linux**: 文件路径应为 `~/.mcp-config.json`
+    - **Windows**: 文件路径应为 `C:\\Users\\YourUsername\\.mcp-config.json`
+
+- **配置文件内容**:
+  - 将以下内容**完整复制**到你创建的`mcp-config.json`文件中，并**将`Authorization`的值替换为你自己的有效Token**。
+
+  ```json
+  {
+    "api": {
+      "baseUrl": "http://gw.fshows.com"
+    },
+    "auth": {
+      "Authorization": "Bearer your_personal_token_here"
+    }
+  }
+  ```
+
+### 3. 在 Cursor 中配置
+
+最后，告诉Cursor如何找到并运行这个工具。
+
+- **添加工具配置**:
+  - 将下面的JSON代码块添加到`"MCP"`的配置中。
+
+  ```json
+  "iteration-mcp-v2": {
+      "name": "iteration-mcp-v2",
+      "command": "npx",
+      "args": [
+          "-y",
+          "@asthestarslept/iteration-mcp"
+      ],
+      "description": "用于创建和管理迭代的MCP工具"
+  }
+  ```
+  
+- **保存并重启**: 保存文件，然后**重启Cursor**以加载新工具。
+
+**配置完成！** 现在你可以在Cursor中通过 `@iteration-mcp-v2` 来使用这个工具了。
+
 ## 🔧 工具列表
 
 ### 认证工具
