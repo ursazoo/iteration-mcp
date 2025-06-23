@@ -134,7 +134,7 @@ export class APIManager {
   }
 
   /**
-   * 阶段1：创建迭代基础信息
+   * 阶段1：创建迭代
    */
   private async createIteration(basicInfo: IterationBasicInfo): Promise<{
     iterationId: string;
@@ -142,11 +142,56 @@ export class APIManager {
   }> {
     const url = `${this.config.api.baseUrl}${this.config.api.endpoints.createIteration}`;
     
+    // 首先获取项目列表，匹配正确的projectId
+    let projectId: number;
+    try {
+      const projectList = await this.getProjectList();
+      
+      // 检查用户输入是否为纯数字（projectId）
+      const inputAsNumber = parseInt(basicInfo.projectLine);
+      if (!isNaN(inputAsNumber) && inputAsNumber > 0) {
+        // 输入的是数字，直接作为projectId使用
+        const projectById = projectList.find(project => project.id === inputAsNumber);
+        if (projectById) {
+          projectId = inputAsNumber;
+          console.log(`✅ 通过ID找到匹配的项目: ${projectById.name} (ID: ${projectId})`);
+        } else {
+          // 项目ID不存在，抛出错误
+          const availableProjects = projectList.map(p => `${p.name}(${p.id})`).join(', ');
+          throw new Error(`项目ID "${inputAsNumber}" 不存在。可用项目列表: ${availableProjects}`);
+        }
+      } else {
+        // 输入的是项目名称，进行名称匹配
+        const matchedProject = projectList.find(project => 
+          project.name === basicInfo.projectLine || 
+          project.name.includes(basicInfo.projectLine) ||
+          basicInfo.projectLine.includes(project.name)
+        );
+        
+        if (matchedProject) {
+          projectId = matchedProject.id;
+          console.log(`✅ 通过名称找到匹配的项目: ${matchedProject.name} (ID: ${projectId})`);
+        } else {
+          // 项目名称不存在，抛出错误
+          const availableProjects = projectList.map(p => `${p.name}(${p.id})`).join(', ');
+          throw new Error(`未找到匹配的项目线 "${basicInfo.projectLine}"。可用项目列表: ${availableProjects}`);
+        }
+      }
+    } catch (error) {
+      // 如果是项目匹配错误，直接重新抛出
+      if (error instanceof Error && (error.message.includes('不存在') || error.message.includes('未找到'))) {
+        throw error;
+      }
+      // 如果是获取项目列表的网络错误，给出友好提示
+      console.warn('⚠️ 获取项目列表失败:', error);
+      throw new Error(`无法获取项目列表，请检查网络连接或稍后重试。原始错误: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
     // 准备API所需的数据格式
     const payload = {
-      projectId: 1, // 默认项目ID，可能需要根据实际情况调整
+      projectId: projectId, // 使用动态获取的项目ID
       name: basicInfo.iterationName, // 迭代名称
-      projectLine: basicInfo.projectLine,
+      projectLine: basicInfo.projectLine, // 保留项目线字段（虽然服务端可能忽略）
       releaseTime: basicInfo.onlineTime + ' 00:00:00', // 使用releaseTime而非onlineDate
       remark: basicInfo.remarks || '' // 使用remark而非description
     };
