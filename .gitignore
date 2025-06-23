@@ -71,3 +71,14 @@ temp/
 # User configuration files
 config.json
 *.config.local.json 
+# Configuration files
+*config.json
+
+# Log files
+*.log
+
+# Packaged output
+/dist
+*.exe
+*.dmg
+

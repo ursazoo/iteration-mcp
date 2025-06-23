@@ -32,6 +32,7 @@ import { loadConfig, validateConfig } from './config.js';    // 配置管理
 import { DingTalkAuth } from './dingtalk.js';               // 钉钉认证模块
 import { CacheManager } from './cache.js';                  // 本地缓存管理
 import { APIManager } from './api.js';                      // API调用管理
+import { TokenManager } from './token.js';                  // Token管理模块
 import { CompleteIteration } from './types.js';             // 类型定义
 import { GitInfo } from './git-utils.js';                   // Git信息工具
 
@@ -54,6 +55,9 @@ class IterationMCPServer {
   
   /** 钉钉认证管理器，处理登录和token管理 */
   private dingTalkAuth: DingTalkAuth | null = null;
+  
+  /** Token管理器，处理认证token的获取和管理 */
+  private tokenManager: TokenManager;
   
   /** 本地缓存管理器，缓存用户列表、项目线等数据 */
   private cacheManager: CacheManager;
@@ -108,6 +112,7 @@ class IterationMCPServer {
     }
     
     // ==================== 初始化组件 ====================
+    this.tokenManager = new TokenManager();
     // 初始化缓存管理器（用于存储用户列表、项目线等数据）
     this.cacheManager = new CacheManager();
     
@@ -279,29 +284,22 @@ class IterationMCPServer {
    * @returns MCP响应对象，包含登录状态和系统信息
    */
   private async handleCheckLoginStatus() {
-    try {
-      // 检查是否有有效的登录token
-      const isLoggedIn = this.dingTalkAuth?.isLoggedIn() || false;
-      
+    // 检查会话中是否存在个人Token
+    if (this.tokenManager.hasSessionToken()) {
       return {
-        content: [
-          {
-            type: 'text',
-            text: `🔧 **MCP Server版本**: 1.0.1\n` +
-                  `🔧 **配置信息**: ${JSON.stringify(this.config, null, 2)}\n` +
-                  `🔧 **当前工作目录**: ${process.env.PWD || process.cwd()}\n\n` +
-                  (isLoggedIn ? '✅ 已登录钉钉' : '❌ 未登录钉钉')
-          }
-        ]
+        content: [{ type: 'text', text: '✅ 您已登录，使用的是个人会话Token。' }]
+      };
+    }
+
+    // 检查是否能找到共享配置文件Token
+    try {
+      await this.tokenManager.getToken();
+      return {
+        content: [{ type: 'text', text: '⚠️ 您当前未登录，将使用共享的配置文件Token。如需使用个人身份操作，请调用 `login_dingtalk`。' }]
       };
     } catch (error) {
       return {
-        content: [
-          {
-            type: 'text',
-            text: `检查登录状态失败: ${error}`
-          }
-        ]
+        content: [{ type: 'text', text: `❌ 您当前未登录，也未找到任何可用的共享Token。请调用 \`login_dingtalk\` 或配置共享Token。` }]
       };
     }
   }
@@ -320,48 +318,37 @@ class IterationMCPServer {
    */
   private async handleDingTalkLogin() {
     try {
-      // 确保配置已加载
-      if (!this.config) {
-        this.config = loadConfig();
-        validateConfig(this.config);
-      }
-
-      // 初始化钉钉认证管理器
-      if (!this.dingTalkAuth) {
-        this.dingTalkAuth = new DingTalkAuth(this.config.dingtalk);
-      }
-
-      // 执行登录流程
+      console.log('🚀 启动钉钉扫码登录流程...');
+      this.dingTalkAuth = new DingTalkAuth(this.config.dingtalk);
       const loginResult = await this.dingTalkAuth.login();
       
-      if (loginResult.success) {
-        // 登录成功，初始化API管理器
-        this.apiManager = new APIManager(this.config, loginResult.accessToken!);
+      if (loginResult.success && loginResult.accessToken) {
+        // 登录成功，将个人Token设置到会话中
+        this.tokenManager.setSessionToken(loginResult.accessToken);
+        
+        // 清理旧的APIManager实例，以便下次使用新的个人Token
+        this.apiManager = null;
         
         return {
           content: [
             {
               type: 'text',
-              text: `✅ 钉钉登录成功！\n用户: ${loginResult.userInfo?.name}\n部门: ${loginResult.userInfo?.department}`
+              text: `✅ **登录成功！**\n\n` +
+                    `欢迎您，${loginResult.userInfo?.name || '用户'}。\n` +
+                    `在当前会话中，所有操作都将以您的个人身份进行。\n\n` +
+                    `💡 您现在可以开始创建迭代了: \`create_iteration step="start"\``
             }
           ]
         };
       } else {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `❌ 钉钉登录失败: ${loginResult.message}`
-            }
-          ]
-        };
+        throw new Error(loginResult.message || '获取Token失败');
       }
     } catch (error) {
       return {
         content: [
           {
             type: 'text',
-            text: `钉钉登录失败: ${error}`
+            text: `❌ 钉钉登录失败: ${error}`
           }
         ]
       };
@@ -472,7 +459,9 @@ class IterationMCPServer {
                 `📋 **第一步：基础信息**\n` +
                 `请提供以下信息：\n\n` +
                 projectListText +
-                `1. **项目线** (从上述列表中选择或输入其他项目线名称)\n` +
+                `1. **项目线** (支持两种输入方式):\n` +
+                `   - 输入项目ID (如: 1, 2, 3)\n` +
+                `   - 输入项目名称 (如: 医美, 行业, 前端框架)\n` +
                 `2. **迭代名称** (例如：v1.2.0 用户体验优化迭代)\n` +
                 `3. **上线时间** (格式：YYYY-MM-DD)\n` +
                 `4. **备注** (可选)\n\n` +
@@ -481,12 +470,15 @@ class IterationMCPServer {
                 `create_iteration\n` +
                 `step: "basic_info"\n` +
                 `data: "{\n` +
-                `  \\"projectLine\\": \\"前端框架\\",\n` +
+                `  \\"projectLine\\": \\"2\\",\n` +
                 `  \\"iterationName\\": \\"v1.2.0 用户体验优化迭代\\",\n` +
                 `  \\"onlineTime\\": \\"2024-02-15\\",\n` +
                 `  \\"remarks\\": \\"专注于提升用户界面交互体验\\"\n` +
                 `}"\n` +
                 `\`\`\`\n\n` +
+                `📝 **项目线输入示例**：\n` +
+                `- 输入项目ID: \\"projectLine\\": \\"2\\"\n` +
+                `- 输入项目名称: \\"projectLine\\": \\"行业\\"\n\n` +
                 `📊 **可用人员信息：**\n` +
                 `参与人员：${participants.map(p => `${p.realName}(${p.id})`).join(', ')}\n` +
                 `审核人员：${reviewers.map(r => `${r.realName}(${r.id})`).join(', ')}`
@@ -795,12 +787,17 @@ class IterationMCPServer {
             text: `🎉 迭代信息收集完成！\n\n` +
                   `📝 **完整数据预览：**\n` +
                   `\`\`\`json\n${JSON.stringify(completeIteration, null, 2)}\n\`\`\`\n\n` +
-                  `✅ 现在可以使用 **submit_complete_iteration** 工具提交完整迭代信息。\n\n` +
-                  `💡 提交命令：\n` +
+                  `⚠️ **请仔细确认上述数据是否正确！**\n\n` +
+                  `✅ 如果数据正确，请**手动执行**以下命令提交：\n\n` +
                   `\`\`\`\n` +
                   `submit_complete_iteration\n` +
-                  `iteration_data: "[上面的JSON数据]"\n` +
-                  `\`\`\``
+                  `iteration_data: "[请复制上面的完整JSON数据]"\n` +
+                  `\`\`\`\n\n` +
+                  `🛑 **重要提醒**：\n` +
+                  `- 请勿让系统自动提交\n` +
+                  `- 必须由用户手动确认并执行提交命令\n` +
+                  `- 提交前请仔细检查所有数据是否正确\n\n` +
+                  `❌ 如果数据有误，请重新开始流程：create_iteration step="start"`
           }
         ]
       };
@@ -809,17 +806,26 @@ class IterationMCPServer {
     }
   }
 
+  private async getAPIManager(): Promise<APIManager> {
+    // 如果已有APIManager实例，且其token与当前会话token一致，则直接返回
+    // (这里的逻辑可以更完善，但目前为了简化，每次都重新获取)
+
+    console.log('🔧 正在初始化/刷新API管理器...');
+    const token = await this.tokenManager.getToken();
+    
+    // 创建或更新APIManager实例
+    this.apiManager = new APIManager(this.config, token);
+    console.log('✅ API管理器已准备就绪');
+    
+    return this.apiManager;
+  }
+
   private async handleSubmitCompleteIteration(args: any) {
     try {
       const { iteration_data } = args;
       
-      // 如果没有APIManager，使用测试Token创建一个
-      if (!this.apiManager) {
-        console.log('🔧 创建临时APIManager进行提交...');
-        const realToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoUmVzdWx0Ijp0cnVlLCJzeXN0ZW1BbGxvd2VkIjpmYWxzZSwicmVkaXJlY3RVcmwiOm51bGwsInVuaW9uaWQiOiJ2d1J5R2t0bmlTaVNzZmdwVThMdlV1N2dpRWlFIiwidG9rZW4iOiJhODM1YWNlOTI5ZGQ0NjRmOThjOGZmODgzMzA0NmFlMyIsInJlYWxOYW1lIjoi5pu556em6ZSLIiwiYXZhdGFyIjoiaHR0cHM6Ly9zdGF0aWMtbGVnYWN5LmRpbmd0YWxrLmNvbS9tZWRpYS9sQURQRDN6VVVKWDFSZTdOQW1yTkFuNF82MzhfNjE4LmpwZyIsInBob25lIjoiMTg4Njg0MTIwOTgiLCJlbWFpbCI6IiIsImpvYk51bWJlciI6IjUyMzQiLCJ2aXNpdG9yVW5pb25JZExpc3QiOltdLCJleHRlbmRHcmFudExpc3QiOltdLCJyb2xlTGlzdCI6WzEwMDAwMDIzN10sIm1lbnVMaXN0IjpbImhvbWUiXSwiZnVuY3Rpb25MaXN0IjpbXSwiaW50ZXJmYWNlTGlzdCI6W10sInVzZXJJZCI6MzcsImlhdCI6MTc1MDY1MzY2MiwiZXhwIjoxNzUwNzQwMDYyfQ.owiWi116C2a1qQMPkhMGH8wDPfW7Zaftl430JdcVRb8';
-        this.apiManager = new APIManager(this.config, realToken);
-        console.log('🔑 使用真实Token进行提交');
-      }
+      // 通过新的方法获取API管理器，它会自动处理Token
+      const apiManager = await this.getAPIManager();
       
       // 解析JSON数据
       let iterationData: CompleteIteration;
@@ -840,7 +846,7 @@ class IterationMCPServer {
       
       console.log('🔥 步骤1: 开始API提交...');
       // 提交完整迭代（两阶段）
-      const result = await this.apiManager.submitCompleteIteration(iterationData);
+      const result = await apiManager.submitCompleteIteration(iterationData);
       console.log('🔥 步骤1: API提交成功，结果:', result);
       
       console.log('🔥 步骤2: 开始更新缓存...');
@@ -874,10 +880,36 @@ class IterationMCPServer {
     } catch (error) {
       console.error('🚨 提交迭代信息时发生错误:', error);
       
+      // 检查是否是项目匹配错误
+      if (error instanceof Error && 
+          (error.message.includes('不存在') || 
+           error.message.includes('未找到') || 
+           error.message.includes('可用项目列表'))) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `❌ **项目线配置错误**\n\n` +
+                    `🚨 ${error.message}\n\n` +
+                    `💡 **解决方案：**\n` +
+                    `1. 请重新开始流程：\`create_iteration step="start"\`\n` +
+                    `2. 在基础信息中输入正确的项目线名称或项目ID\n` +
+                    `3. 参考上面提示的可用项目列表选择正确的项目\n\n` +
+                    `📝 **输入示例：**\n` +
+                    `- 使用项目ID: \`"projectLine": "2"\`\n` +
+                    `- 使用项目名称: \`"projectLine": "行业"\``
+            }
+          ]
+        };
+      }
+      
+      // 其他类型的错误
       let errorInfo = '';
       if (error instanceof Error) {
         errorInfo = `错误消息: ${error.message}\n`;
-        errorInfo += `错误堆栈: ${error.stack}\n`;
+        if (process.env.NODE_ENV === 'development') {
+          errorInfo += `错误堆栈: ${error.stack}\n`;
+        }
       } else {
         errorInfo = `未知错误: ${String(error)}\n`;
       }
@@ -887,21 +919,24 @@ class IterationMCPServer {
         const axiosError = error as any;
         errorInfo += `HTTP状态码: ${axiosError.response?.status}\n`;
         errorInfo += `响应数据: ${JSON.stringify(axiosError.response?.data, null, 2)}\n`;
-        errorInfo += `请求URL: ${axiosError.config?.url}\n`;
-        errorInfo += `请求方法: ${axiosError.config?.method}\n`;
-        errorInfo += `请求头: ${JSON.stringify(axiosError.config?.headers, null, 2)}\n`;
+        if (process.env.NODE_ENV === 'development') {
+          errorInfo += `请求URL: ${axiosError.config?.url}\n`;
+          errorInfo += `请求方法: ${axiosError.config?.method}\n`;
+          errorInfo += `请求头: ${JSON.stringify(axiosError.config?.headers, null, 2)}\n`;
+        }
       }
-      
-      // 添加完整的错误对象信息
-      errorInfo += `完整错误对象: ${JSON.stringify(error, null, 2)}\n`;
       
       return {
         content: [
           {
             type: 'text',
             text: `❌ 提交失败\n\n` +
-                  `🚨 **详细错误信息:**\n` +
-                  `\`\`\`\n${errorInfo}\`\`\``
+                  `🚨 **错误信息:**\n` +
+                  `\`\`\`\n${errorInfo}\`\`\`\n\n` +
+                  `💡 **建议解决方案：**\n` +
+                  `1. 检查网络连接是否正常\n` +
+                  `2. 确认Token是否有效\n` +
+                  `3. 重新开始流程：\`create_iteration step="start"\``
           }
         ]
       };
@@ -910,15 +945,10 @@ class IterationMCPServer {
 
   private async handleGetUserList(args: any) {
     try {
-              console.log('👥 开始获取用户列表...');
+      console.log('👥 开始获取用户列表...');
         
-        // 直接创建APIManager进行获取，使用真实token
-        if (!this.apiManager) {
-          console.log('🔧 创建临时APIManager...');
-        const realToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoUmVzdWx0Ijp0cnVlLCJzeXN0ZW1BbGxvd2VkIjpmYWxzZSwicmVkaXJlY3RVcmwiOm51bGwsInVuaW9uaWQiOiJ2d1J5R2t0bmlTaVNzZmdwVThMdlV1N2dpRWlFIiwidG9rZW4iOiJhODM1YWNlOTI5ZGQ0NjRmOThjOGZmODgzMzA0NmFlMyIsInJlYWxOYW1lIjoi5pu556em6ZSLIiwiYXZhdGFyIjoiaHR0cHM6Ly9zdGF0aWMtbGVnYWN5LmRpbmd0YWxrLmNvbS9tZWRpYS9sQURQRDN6VVVKWDFSZTdOQW1yTkFuNF82MzhfNjE4LmpwZyIsInBob25lIjoiMTg4Njg0MTIwOTgiLCJlbWFpbCI6IiIsImpvYk51bWJlciI6IjUyMzQiLCJ2aXNpdG9yVW5pb25JZExpc3QiOltdLCJleHRlbmRHcmFudExpc3QiOltdLCJyb2xlTGlzdCI6WzEwMDAwMDIzN10sIm1lbnVMaXN0IjpbImhvbWUiXSwiZnVuY3Rpb25MaXN0IjpbXSwiaW50ZXJmYWNlTGlzdCI6W10sInVzZXJJZCI6MzcsImlhdCI6MTc1MDY1MzY2MiwiZXhwIjoxNzUwNzQwMDYyfQ.owiWi116C2a1qQMPkhMGH8wDPfW7Zaftl430JdcVRb8';
-        this.apiManager = new APIManager(this.config, realToken);
-        console.log('🔑 使用真实Token:', realToken.substring(0, 50) + '...');
-      }
+      // 通过新的方法获取API管理器，它会自动处理Token
+      const apiManager = await this.getAPIManager();
 
       console.log('🔍 调用getUserList接口...');
       
@@ -927,7 +957,7 @@ class IterationMCPServer {
       let errorInfo = '';
       
       try {
-        result = await this.apiManager.getUserList();
+        result = await apiManager.getUserList();
         console.log('✅ getUserList接口调用成功');
       } catch (error) {
         console.error('❌ getUserList接口调用失败:', error);
@@ -1027,7 +1057,9 @@ class IterationMCPServer {
  * 这是程序的入口点
  */
 const server = new IterationMCPServer();
-server.run().catch(console.error);
+server.run().catch((err) => {
+  console.error('❌ MCP服务器启动失败:', err);
+});
 
 // ==================== 模块导出 ====================
 
