@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import axios from 'axios';
 // 缓存文件路径
 const CACHE_PATH = join(homedir(), '.iteration-mcp-cache.json');
 // 缓存有效期（24小时）
@@ -14,54 +15,40 @@ export class CacheManager {
         this.config = config;
     }
     /**
-     * 生成迭代模板数据
+     * 生成CR申请单模板数据
      */
-    async generateIterationTemplate() {
+    async generateCRApplicationTemplate() {
         const cache = this.getCache();
         const participants = await this.getParticipants();
         const reviewers = await this.getReviewers();
         // 获取最近使用的人员作为默认值
-        const recentParticipants = cache.recentParticipants.slice(0, 3);
-        const recentReviewers = cache.recentReviewers.slice(0, 2);
+        const recentParticipants = cache.recentParticipants.slice(0, 2);
+        const recentReviewers = cache.recentReviewers.slice(0, 1);
         return {
-            basicInfo: {
-                projectLine: cache.defaultProjectLine || '',
-                iterationName: '',
-                onlineTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 默认一周后
-                remarks: ''
-            },
-            crApplication: {
-                projectInfo: {
-                    projectName: '',
-                    projectManager: recentParticipants[0] || '',
-                    technicalLeader: recentParticipants[1] || '',
-                    participants: recentParticipants,
-                    startDate: new Date().toISOString().split('T')[0],
-                    endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 默认两周后
-                    description: '',
-                    techStack: '',
-                    riskAssessment: ''
-                },
-                componentModules: [
-                    {
-                        name: '',
-                        relativePath: '',
-                        url: '',
-                        reviewer: recentReviewers[0] || '',
-                        image: {
-                            type: 'upload_later'
-                        }
-                    }
-                ],
-                functionModules: [
-                    {
-                        name: '',
-                        relativePath: '',
-                        reviewer: recentReviewers[0] || '',
-                        description: ''
-                    }
-                ]
-            }
+            reqDocUrl: "",
+            techDocUrl: "",
+            projexUrl: "-",
+            uxDocUrl: "",
+            gitlabUrl: "",
+            gitProjectName: "",
+            gitlabBranch: "",
+            participantIds: recentParticipants.join(','),
+            checkUserIds: recentReviewers.join(','),
+            spendTime: "4",
+            componentList: [
+                {
+                    componentName: "",
+                    address: "",
+                    auditId: recentReviewers[0] || 1,
+                    imgUrl: ""
+                }
+            ],
+            functionList: [
+                {
+                    desc: ""
+                }
+            ],
+            sprintId: 0 // 将在创建迭代后设置
         };
     }
     /**
@@ -72,16 +59,35 @@ export class CacheManager {
         if (iteration.basicInfo.projectLine) {
             this.updateProjectLine(iteration.basicInfo.projectLine);
         }
-        // 更新最近使用的人员
-        const participantIds = [
-            iteration.crApplication.projectInfo.projectManager,
-            iteration.crApplication.projectInfo.technicalLeader,
-            ...(iteration.crApplication.projectInfo.participants || [])
-        ].filter(Boolean);
-        const reviewerIds = [
-            ...iteration.crApplication.componentModules.map(m => m.reviewer),
-            ...iteration.crApplication.functionModules.map(m => m.reviewer)
-        ].filter(Boolean);
+        // 从CR申请单中提取人员ID（适配两种数据格式）
+        let participantIds = [];
+        let reviewerIds = [];
+        // 检查是否有API格式的数据
+        if (iteration.crApplication.participantIds) {
+            participantIds = iteration.crApplication.participantIds
+                .split(',')
+                .map((id) => parseInt(id.trim()))
+                .filter((id) => !isNaN(id));
+        }
+        else if (iteration.crApplication.projectInfo?.participants) {
+            // 使用收集格式的数据
+            participantIds = iteration.crApplication.projectInfo.participants
+                .map((id) => parseInt(id))
+                .filter((id) => !isNaN(id));
+        }
+        // 检查是否有API格式的数据
+        if (iteration.crApplication.checkUserIds) {
+            reviewerIds = iteration.crApplication.checkUserIds
+                .split(',')
+                .map((id) => parseInt(id.trim()))
+                .filter((id) => !isNaN(id));
+        }
+        else if (iteration.crApplication.projectInfo?.reviewers) {
+            // 使用收集格式的数据
+            reviewerIds = iteration.crApplication.projectInfo.reviewers
+                .map((id) => parseInt(id))
+                .filter((id) => !isNaN(id));
+        }
         this.updateRecentPersonnel(participantIds, reviewerIds);
     }
     /**
@@ -143,6 +149,21 @@ export class CacheManager {
         return cache.reviewers;
     }
     /**
+     * 根据ID获取用户信息
+     */
+    async getUserInfo(id, type = 'participant') {
+        const users = type === 'participant' ? await this.getParticipants() : await this.getReviewers();
+        return users.find(user => user.id === id) || null;
+    }
+    /**
+     * 根据姓名获取用户ID
+     */
+    async getUserIdByName(name, type = 'participant') {
+        const users = type === 'participant' ? await this.getParticipants() : await this.getReviewers();
+        const user = users.find(user => user.realName === name);
+        return user ? user.id : null;
+    }
+    /**
      * 更新最近使用的人员
      */
     updateRecentPersonnel(participantIds, reviewerIds) {
@@ -171,17 +192,60 @@ export class CacheManager {
         this.saveCache(cache);
     }
     /**
+     * 上传图片到OSS（暂未配置OSS，返回占位符）
+     */
+    async uploadImageToOSS(imageBuffer, filename) {
+        try {
+            if (!this.config?.oss) {
+                console.warn('OSS配置未设置，无法上传图片。如需上传功能，请在配置中添加OSS配置。');
+                // 返回占位符URL
+                return `https://placeholder.example.com/images/${filename}`;
+            }
+            // TODO: 实现真实的OSS上传逻辑
+            // 需要安装 ali-oss 依赖：npm install ali-oss
+            console.log('上传图片到OSS:', filename);
+            return `https://${this.config.oss.bucket}.${this.config.oss.region}.aliyuncs.com/${filename}`;
+        }
+        catch (error) {
+            console.error('上传图片失败:', error);
+            throw error;
+        }
+    }
+    /**
+     * 处理从对话中获取的图片URL并上传到OSS（暂未配置OSS）
+     */
+    async processImageFromChat(imageUrl, componentName) {
+        try {
+            if (!this.config?.oss) {
+                console.warn('OSS未配置，无法处理图片上传');
+                return imageUrl; // 直接返回原始URL
+            }
+            // 下载图片
+            const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+            const imageBuffer = Buffer.from(response.data);
+            // 生成文件名
+            const timestamp = Date.now();
+            const filename = `components/${componentName}-${timestamp}.jpg`;
+            // 上传到OSS
+            return await this.uploadImageToOSS(imageBuffer, filename);
+        }
+        catch (error) {
+            console.error('处理图片失败:', error);
+            // 失败时返回原始URL作为备选
+            return imageUrl;
+        }
+    }
+    /**
      * 刷新人员数据（从API获取）
      */
     async refreshPersonnelData() {
         try {
             console.log('正在更新人员信息...');
-            // TODO: 替换为真实API调用
-            const participants = await this.fetchParticipantsFromAPI();
-            const reviewers = await this.fetchReviewersFromAPI();
+            const users = await this.fetchUsersFromAPI();
             const cache = this.getCache();
-            cache.participants = participants;
-            cache.reviewers = reviewers;
+            // 所有用户都可以是参与者和审核者
+            cache.participants = users;
+            cache.reviewers = users;
             this.saveCache(cache);
             console.log('人员信息更新完成');
         }
@@ -190,32 +254,37 @@ export class CacheManager {
         }
     }
     /**
-     * 从API获取参与人员（当前使用mock数据）
+     * 从API获取用户列表
      */
-    async fetchParticipantsFromAPI() {
-        // TODO: 替换为真实API调用
-        // const response = await axios.get(`${this.config.api.baseUrl}${this.config.api.endpoints.getParticipants}`);
-        // return response.data;
-        // Mock数据
+    async fetchUsersFromAPI() {
+        try {
+            if (this.config?.api) {
+                // 注意：这里需要认证token，但在缓存管理器中我们没有token
+                // 建议在实际使用中通过APIManager来获取用户列表，而不是直接在缓存中调用
+                console.warn('缓存管理器中直接调用API需要认证token，建议使用APIManager');
+                const response = await axios.post(`${this.config.api.baseUrl}${this.config.api.endpoints.getUserList}`, {}, {
+                    headers: {
+                        'Content-Type': 'application/json'
+                        // 'Authorization': `Bearer ${token}` // 需要token认证
+                    }
+                });
+                // 解析响应数据
+                if (response.data.success && response.data.data?.list) {
+                    return response.data.data.list;
+                }
+            }
+        }
+        catch (error) {
+            console.error('从API获取用户列表失败:', error);
+        }
+        // 返回Mock数据（基于真实API响应格式）
         return [
-            { id: 'p001', name: '张三', role: '前端开发', department: '技术部' },
-            { id: 'p002', name: '李四', role: '后端开发', department: '技术部' },
-            { id: 'p003', name: '王五', role: 'UI设计师', department: '设计部' },
-            { id: 'p004', name: '赵六', role: '产品经理', department: '产品部' },
-        ];
-    }
-    /**
-     * 从API获取审核人员（当前使用mock数据）
-     */
-    async fetchReviewersFromAPI() {
-        // TODO: 替换为真实API调用
-        // const response = await axios.get(`${this.config.api.baseUrl}${this.config.api.endpoints.getReviewers}`);
-        // return response.data;
-        // Mock数据
-        return [
-            { id: 'r001', name: '架构师A', role: '技术架构师', department: '技术部' },
-            { id: 'r002', name: '技术专家B', role: '高级工程师', department: '技术部' },
-            { id: 'r003', name: '项目经理C', role: '项目经理', department: '项目部' },
+            { id: 1, realName: '郭晓婷' },
+            { id: 2, realName: '张城' },
+            { id: 3, realName: '谢永聪' },
+            { id: 4, realName: '白杨' },
+            { id: 5, realName: '余晓聪' },
+            { id: 37, realName: '曹秦锋' }
         ];
     }
     /**

@@ -34,7 +34,7 @@ export declare class GitUtils {
      */
     private getCurrentBranch;
     /**
-     * 计算预估工时（天数）
+     * 计算预估工时（天数）- 基于分支创建时间或最近活动
      */
     private calculateWorkDays;
     /**
@@ -42,8 +42,8 @@ export declare class GitUtils {
      */
     isGitRepository(): boolean;
     /**
-     * 创建示例配置文件
+     * 从目录名获取项目名称
      */
-    createExampleConfigFile(): void;
+    private getProjectNameFromDirectory;
 }
 //# sourceMappingURL=git-utils.d.ts.map
