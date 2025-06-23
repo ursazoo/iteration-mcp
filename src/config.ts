@@ -25,7 +25,7 @@ const MCP_CONFIG: MCPConfig = {
   
   // API接口配置
   api: {
-    baseUrl: "http://gw.fshows.com",
+    baseUrl: "", // baseUrl将从外部配置文件加载
     endpoints: {
       // ==================== 通用接口 ====================
       login: "/api/public/login", // 用户登录接口

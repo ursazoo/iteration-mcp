@@ -1,25 +1,43 @@
 {
-  "name": "ts-mcp",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "name": "@asthestarslept/iteration-mcp",
+  "version": "1.0.2",
+  "description": "MCP迭代管理工具",
+  "main": "dist/index.js",
+  "bin": {
+    "iteration-mcp": "dist/index.js"
   },
-  "keywords": [],
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "pkg": {
+    "scripts": "dist/**/*.js",
+    "assets": [
+      "git_info.config.json",
+      "test-token.config.json"
+    ],
+    "targets": [
+      "node18-macos-arm64"
+    ],
+    "outputPath": "dist"
+  },
+  "keywords": [
+    "mcp",
+    "iteration",
+    "automation"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
-    "qrcode-terminal": "^0.12.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.6.0",
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
     "@types/node": "^20.0.0",
-    "@types/qrcode-terminal": "^0.12.0"
+    "@types/qrcode-terminal": "^0.12.0",
+    "pkg": "^5.8.1",
+    "typescript": "^5.0.0"
   }
 }
