@@ -23,6 +23,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListRootsRequestSchema,
   ErrorCode,
   McpError
 } from '@modelcontextprotocol/sdk/types.js';
@@ -68,6 +69,9 @@ class IterationMCPServer {
   /** API调用管理器，处理所有HTTP请求 */
   private apiManager: APIManager | null = null;
   
+  /** workspace根目录列表，来自MCP客户端 */
+  private workspaceRoots: string[] = [];
+  
   // ==================== 会话状态管理 ====================
   /**
    * 临时会话存储，用于多步骤迭代创建流程
@@ -100,7 +104,8 @@ class IterationMCPServer {
       },
       {
         capabilities: {
-          tools: {}                      // 声明支持工具调用
+          tools: {},                     // 声明支持工具调用
+          roots: {}                      // 声明支持roots获取
         }
       }
     );
@@ -121,6 +126,69 @@ class IterationMCPServer {
     
     // 设置MCP请求处理器
     this.setupHandlers();
+    
+    // 初始化workspace根目录
+    this.initializeWorkspaceRoots();
+  }
+
+  /**
+   * 设置workspace根目录
+   * @param roots 从MCP客户端获取的workspace根目录列表
+   */
+  private setWorkspaceRoots(roots: string[]) {
+    this.workspaceRoots = roots;
+    console.log(`🔧 MCP客户端提供的workspace根目录:`, roots);
+    
+    // 更新config中的projectPath为第一个root
+    if (roots.length > 0 && this.config) {
+      // 从file:// URI转换为本地路径
+      const firstRoot = roots[0].replace(/^file:\/\//, '');
+      this.config.projectPath = firstRoot;
+      console.log(`✅ 已设置项目路径为: ${firstRoot}`);
+    }
+  }
+
+  /**
+   * 获取当前有效的工作目录
+   * 优先级：workspace roots > 自动检测
+   */
+  private getEffectiveWorkingDirectory(): string {
+    if (this.workspaceRoots.length > 0) {
+      // 从file:// URI转换为本地路径
+      const workspaceRoot = this.workspaceRoots[0].replace(/^file:\/\//, '');
+      console.log(`✅ 使用MCP workspace根目录: ${workspaceRoot}`);
+      return workspaceRoot;
+    }
+    
+    // 回退到自动检测
+    return this.detectWorkingDirectory();
+  }
+
+  /**
+   * 初始化workspace根目录
+   * 在MCP协议中，客户端应该主动调用roots/list，但如果没有调用，我们主动设置当前目录
+   */
+  private initializeWorkspaceRoots() {
+    // 如果还没有workspace roots，尝试从环境变量或当前目录设置
+    if (this.workspaceRoots.length === 0) {
+      // 首先尝试从环境变量获取
+      const envWorkdir = process.env.PWD || process.env.INIT_CWD;
+      if (envWorkdir && envWorkdir !== '/') {
+        const fileUri = `file://${envWorkdir}`;
+        this.setWorkspaceRoots([fileUri]);
+        console.log(`🔍 从环境变量初始化workspace根目录: ${envWorkdir}`);
+      } else {
+        // 最后回退到process.cwd()，但要检查是否合理
+        const currentDir = process.cwd();
+        if (currentDir !== '/') {
+          const fileUri = `file://${currentDir}`;
+          this.setWorkspaceRoots([fileUri]);
+          console.log(`🔍 从进程目录初始化workspace根目录: ${currentDir}`);
+        } else {
+          console.warn('⚠️ 无法确定有效的workspace根目录，请确保在正确的项目目录中运行');
+        }
+      }
+    }
   }
 
   /**
@@ -131,6 +199,39 @@ class IterationMCPServer {
    * 2. CallToolRequestSchema: 处理具体的工具调用请求
    */
   private setupHandlers() {
+    // ==================== Roots处理器 ====================
+    /**
+     * 处理根目录列表请求，返回当前workspace的根目录
+     * 并自动设置为工作目录
+     */
+    this.server.setRequestHandler(ListRootsRequestSchema, async () => {
+      console.log('🔍 MCP客户端请求workspace根目录列表');
+      
+      // 如果已经有根目录，返回它们
+      if (this.workspaceRoots.length > 0) {
+        return {
+          roots: this.workspaceRoots.map(root => ({
+            uri: root,
+            name: root.split('/').pop() || root
+          }))
+        };
+      }
+      
+      // 否则尝试获取当前工作目录作为fallback
+      const currentDir = process.cwd();
+      const fileUri = `file://${currentDir}`;
+      
+      // 设置这个作为workspace root
+      this.setWorkspaceRoots([fileUri]);
+      
+      return {
+        roots: [{
+          uri: fileUri,
+          name: currentDir.split('/').pop() || 'workspace'
+        }]
+      };
+    });
+
     // ==================== 工具列表处理器 ====================
     /**
      * 处理工具列表请求，返回所有可用的MCP工具
@@ -377,12 +478,12 @@ class IterationMCPServer {
   private async handleCreateIteration(args: any) {
     const { step, data, workdir } = args;
     
-    // 自动检测工作目录，优先级：手动传递 > 环境变量 > 进程当前目录
-    const detectedWorkdir = this.detectWorkingDirectory(workdir);
+    // 获取有效工作目录，优先级：手动传递 > MCP workspace roots > 自动检测
+    const effectiveWorkdir = workdir || this.getEffectiveWorkingDirectory();
     
     // 设置到config中供Git信息获取使用
     if (this.config) {
-      this.config.projectPath = detectedWorkdir;
+      this.config.projectPath = effectiveWorkdir;
     }
     
     try {
