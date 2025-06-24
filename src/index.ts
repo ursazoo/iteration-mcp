@@ -950,9 +950,8 @@ class IterationMCPServer {
         crApplication: {
           projectInfo: {
             projectName: this.sessionData.projectInfo.gitProjectName,
-            projectManager: this.sessionData.projectInfo.participants?.[0] || '',
-            technicalLeader: this.sessionData.projectInfo.participants?.[1] || '',
             participants: this.sessionData.projectInfo.participants || [],
+            checkUsers: this.sessionData.projectInfo.reviewers || [],
             startDate: new Date().toISOString().split('T')[0],
             endDate: this.sessionData.basicInfo.onlineTime,
             description: this.sessionData.projectInfo.remarks || '',
@@ -972,23 +971,34 @@ class IterationMCPServer {
       return {
         content: [
           {
-            type: 'text',
-            text: `🎉 迭代信息收集完成！\n\n` +
-                  `📝 **完整数据预览：**\n` +
-                  `\`\`\`json\n${JSON.stringify(completeIteration, null, 2)}\n\`\`\`\n\n` +
-                  `⚠️ **请仔细确认上述数据是否正确！**\n\n` +
-                  `✅ 如果数据正确，请**手动执行**以下命令提交：\n\n` +
-                  `\`\`\`\n` +
-                  `submit_complete_iteration\n` +
-                  `iteration_data: "[请复制上面的完整JSON数据]"\n` +
-                  `\`\`\`\n\n` +
-                  `🛑 **重要提醒**：\n` +
-                  `- 请勿让系统自动提交\n` +
-                  `- 必须由用户手动确认并执行提交命令\n` +
-                  `- 提交前请仔细检查所有数据是否正确\n\n` +
-                  `❌ 如果数据有误，请重新开始流程：create_iteration step="start"`
-          }
-        ]
+            type: "text",
+            text:
+              `🎉 迭代信息收集完成！\n\n` +
+              `📝 **完整projectInfo数据预览：**\n` +
+              `\`\`\`json\n${JSON.stringify(
+                this.sessionData.projectInfo,
+                null,
+                2
+              )}\n\`\`\`\n\n` +
+              `📝 **完整crApplication数据预览：**\n` +
+              `\`\`\`json\n${JSON.stringify(
+                completeIteration,
+                null,
+                2
+              )}\n\`\`\`\n\n` +
+              `⚠️ **请仔细确认上述数据是否正确！**\n\n` +
+              `✅ 如果数据正确，请**手动执行**以下命令提交：\n\n` +
+              `\`\`\`\n` +
+              `submit_complete_iteration\n` +
+              `iteration_data: "[请复制上面的完整JSON数据]"\n` +
+              `\`\`\`\n\n` +
+              `🛑 **重要提醒**：\n` +
+              `- 请勿让系统自动提交\n` +
+              `- 必须由用户手动确认并执行提交命令\n` +
+              `- 提交前请仔细检查所有数据是否正确\n\n` +
+              `❌ 如果数据有误，请重新开始流程：create_iteration step="start"`,
+          },
+        ],
       };
     } catch (error) {
       throw new Error(`模块信息格式错误: ${error}`);

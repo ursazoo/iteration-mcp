@@ -36,14 +36,11 @@ export interface IterationBasicInfo {
 // 项目信息
 export interface ProjectInfo {
   projectName: string;
-  projectManager: string;
-  technicalLeader: string;
   participants: string[];
+  checkUsers: string[];
   startDate: string;
   endDate: string;
   description: string;
-  techStack: string;
-  riskAssessment: string;
 }
 
 export interface ComponentModule {
