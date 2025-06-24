@@ -667,10 +667,6 @@ class IterationMCPServer {
     // 清空会话数据，开始新的迭代创建流程
     this.sessionData = {};
     
-    // 获取缓存中的用户数据
-    let participants: UserInfo[] = [];
-    let reviewers: UserInfo[] = [];
-    
     // 尝试获取项目组和用户列表
     let projectListText = '';
     try {
@@ -689,10 +685,6 @@ class IterationMCPServer {
       } else {
         projectListText = `⚠️ 未获取到项目组列表，请手动输入项目线名称。\n\n`;
       }
-      
-      // 获取用户列表
-      participants = await apiManager.getUserList();
-      reviewers = participants; // 假设审核人和参与人是同一组
 
     } catch (error) {
       console.error('获取初始化数据失败:', error);
@@ -704,11 +696,6 @@ class IterationMCPServer {
       
       const errorMessage = `⚠️ API管理器未初始化，请先登录。建议手动输入项目线名称。\n`;
       projectListText = errorMessage;
-      
-      // 如果API获取失败，回退到缓存数据
-      // const cache = this.cacheManager.getCache();
-      participants = await this.cacheManager.getParticipants();
-      reviewers = await this.cacheManager.getReviewers();
     }
     
     return {
@@ -738,10 +725,7 @@ class IterationMCPServer {
                 `\`\`\`\n\n` +
                 `📝 **项目线输入示例**：\n` +
                 `- 输入项目ID: \`"projectLine": "2"\`\n` +
-                `- 输入项目名称: \`"projectLine": "行业"\`\n\n` +
-                `📊 **可用人员信息：**\n` +
-                `参与人员：${participants.length > 0 ? participants.map(p => `${p.realName}(${p.id})`).join(', ') : '未获取到'}\n` +
-                `审核人员：${reviewers.length > 0 ? reviewers.map(r => `${r.realName}(${r.id})`).join(', ') : '未获取到'}`
+                `- 输入项目名称: \`"projectLine": "行业"\`\n\n`
         }
       ]
     };
@@ -750,101 +734,128 @@ class IterationMCPServer {
   private async handleBasicInfo(data: string) {
     try {
       const basicInfo = JSON.parse(data);
-      
+
       // 验证必填字段
-      if (!basicInfo.projectLine || !basicInfo.iterationName || !basicInfo.onlineTime) {
-        throw new Error('项目线、迭代名称和上线时间为必填项');
+      if (
+        !basicInfo.projectLine ||
+        !basicInfo.iterationName ||
+        !basicInfo.onlineTime
+      ) {
+        throw new Error("项目线、迭代名称和上线时间为必填项");
       }
-      
+
       // 保存用户输入的基础信息到会话存储
       this.sessionData.basicInfo = basicInfo;
-      
+
       // 更新缓存中的项目线
       this.cacheManager.updateProjectLine(basicInfo.projectLine);
-      
+
       // 获取Git信息，使用GitUtils智能计算工时
       let gitInfo: GitInfo = {};
-      let debugInfo = '';
-      
+      let debugInfo = "";
+
+      // 获取缓存中的用户数据
+      let participants: UserInfo[] = [];
+      let reviewers: UserInfo[] = [];
+
       try {
         // 使用自动检测的工作目录
         const workspaceRoot = this.config?.projectPath || process.cwd();
-        
+
         debugInfo += `🔧 使用工作目录: ${workspaceRoot}\n`;
-        debugInfo += `🔧 调试 - config.projectPath: ${this.config?.projectPath}\n`;
-        debugInfo += `🔧 调试 - process.cwd(): ${process.cwd()}\n`;
-        debugInfo += `🔧 调试 - PWD环境变量: ${process.env.PWD}\n`;
-        debugInfo += `🔧 调试 - INIT_CWD环境变量: ${process.env.INIT_CWD}\n`;
-        
+        // debugInfo += `🔧 调试 - config.projectPath: ${this.config?.projectPath}\n`;
+        // debugInfo += `🔧 调试 - process.cwd(): ${process.cwd()}\n`;
+        // debugInfo += `🔧 调试 - PWD环境变量: ${process.env.PWD}\n`;
+        // debugInfo += `🔧 调试 - INIT_CWD环境变量: ${process.env.INIT_CWD}\n`;
+
         // 使用GitUtils获取更准确的Git信息
-        const gitUtils = new (await import('./git-utils.js')).GitUtils(workspaceRoot);
+        const gitUtils = new (await import("./git-utils.js")).GitUtils(
+          workspaceRoot
+        );
         const fullGitInfo = await gitUtils.getGitInfo();
-        
+
         // 简单的目录名作为项目名（fallback）
-        const projectName = fullGitInfo.projectName || workspaceRoot.split('/').pop() || 'Unknown Project';
+        const projectName =
+          fullGitInfo.projectName ||
+          workspaceRoot.split("/").pop() ||
+          "Unknown Project";
         gitInfo.projectName = projectName;
-        gitInfo.currentBranch = fullGitInfo.currentBranch || 'main';
+        gitInfo.currentBranch = fullGitInfo.currentBranch;
         gitInfo.projectUrl = fullGitInfo.projectUrl;
-        gitInfo.estimatedWorkDays = fullGitInfo.estimatedWorkDays || 7; // 使用智能计算，fallback为7天
-        
-        debugInfo += `✅ 项目名称: ${projectName}\n`;
-        debugInfo += `✅ 当前分支: ${gitInfo.currentBranch}\n`;
-        debugInfo += `✅ 项目地址: ${gitInfo.projectUrl || '未获取到'}\n`;
-        debugInfo += `✅ 智能预估工时: ${gitInfo.estimatedWorkDays} 天\n`;
-        debugInfo += `✅ Git信息获取完成（使用GitUtils智能分析）\n`;
-        
+        gitInfo.estimatedWorkDays = fullGitInfo.estimatedWorkDays; // 使用智能计算，fallback为7天
+
+        // debugInfo += `✅ 项目名称: ${projectName}\n`;
+        // debugInfo += `✅ 当前分支: ${gitInfo.currentBranch}\n`;
+        // debugInfo += `✅ 项目地址: ${gitInfo.projectUrl || '未获取到'}\n`;
+        // debugInfo += `✅ 智能预估工时: ${gitInfo.estimatedWorkDays} 天\n`;
+        // debugInfo += `✅ Git信息获取完成（使用GitUtils智能分析）\n`;
       } catch (error) {
         debugInfo += `❌ Git信息获取失败: ${error}\n`;
         // Git信息获取失败直接终止流程
         throw new Error(
           `Git信息获取失败，无法继续创建迭代:\n` +
-          `${debugInfo}\n\n` +
-          `请确保：\n` +
-          `1. 当前目录是一个有效的Git仓库\n` +
-          `2. Git环境配置正确\n` +
-          `3. 工作目录路径正确: ${this.config?.projectPath || process.cwd()}\n\n` +
-          `错误详情: ${error}`
+            `${debugInfo}\n\n` +
+            `请确保：\n` +
+            `1. 当前目录是一个有效的Git仓库\n` +
+            `2. Git环境配置正确\n` +
+            `3. 工作目录路径正确: ${
+              this.config?.projectPath || process.cwd()
+            }\n\n` +
+            `错误详情: ${error}`
         );
       }
-      
+
+      // 获取用户列表
+      // 主动获取API管理器，这将自动处理Token和配置加载
+      const apiManager = await this.getAPIManager();
+      participants = await apiManager.getUserList();
+      reviewers = participants; // 假设审核人和参与人是同一组
       const cache = this.cacheManager.getCache();
-      
+
       return {
         content: [
           {
-            type: 'text',
-            text: `✅ 基础信息已收集\n\n` +
-                  `🔧 **调试信息：**\n${debugInfo}\n` +
-                  `📋 **第二步：项目信息**\n` +
-                  `以下信息已自动获取，请确认或修改：\n\n` +
-                  `🔧 **Git信息（自动获取）：**\n` +
-                  `- Git项目地址: ${gitInfo.projectUrl || '未获取到'}\n` +
-                  `- Git项目名称: ${gitInfo.projectName || '未获取到'}\n` +
-                  `- 当前分支: ${gitInfo.currentBranch || '未获取到'}\n` +
-                  `- 预估工时: ${gitInfo.estimatedWorkDays || '未计算'} 天\n\n` +
-                  `👥 **人员信息（从缓存获取）：**\n` +
-                  `- 参与人员: ${cache.participants.map(p => `${p.realName}(${p.id})`).join(', ')}\n` +
-                  `- 复审人员: ${cache.reviewers.map(r => `${r.realName}(${r.id})`).join(', ')}\n\n` +
-                  `💡 请按以下格式调用，确认或修改信息：\n` +
-                  `\`\`\`\n` +
-                  `create_iteration\n` +
-                  `step: "project_info"\n` +
-                  `data: "{\n` +
-                  `  \\"productDoc\\": \\"请输入产品文档链接\\",\n` +
-                  `  \\"technicalDoc\\": \\"请输入技术文档链接\\",\n` +
-                  `  \\"projectDashboard\\": \\"请输入项目大盘链接\\",\n` +
-                  `  \\"designDoc\\": \\"请输入设计文档链接\\",\n` +
-                  `  \\"gitProjectUrl\\": \\"${gitInfo.projectUrl || ''}\\",\n` +
-                  `  \\"gitProjectName\\": \\"${gitInfo.projectName || ''}\\",\n` +
-                  `  \\"developmentBranch\\": \\"${gitInfo.currentBranch || ''}\\",\n` +
-                  `  \\"participants\\": [\\"${cache.participants.map(p => p.id).join('\\", \\"')}\\"],\n` +
-                  `  \\"reviewers\\": [\\"${cache.reviewers.map(r => r.id).join('\\", \\"')}\\"],\n` +
-                  `  \\"workHours\\": ${gitInfo.estimatedWorkDays || 0},\n` +
-                  `  \\"remarks\\": \\"请输入备注信息\\"\n` +
-                  `}"\n` +
-                  `\`\`\``
-          }
-        ]
+            type: "text",
+            text:
+              `✅ 基础信息已收集\n\n` +
+              `🔧 **调试信息：**\n${debugInfo}\n` +
+              `📋 **第二步：项目信息**\n` +
+              `以下信息已自动获取，请确认或修改：\n\n` +
+              `🔧 **Git信息（自动获取）：**\n` +
+              `- Git项目地址: ${gitInfo.projectUrl || "未获取到"}\n` +
+              `- Git项目名称: ${gitInfo.projectName || "未获取到"}\n` +
+              `- 当前分支: ${gitInfo.currentBranch || "未获取到"}\n` +
+              `- 预估工时: ${gitInfo.estimatedWorkDays || "未计算"} 天\n\n` +
+              `👥 **人员信息（从缓存获取）：**\n` +
+              `- 可选人员: ${participants
+                .map((p) => `${p.realName}(${p.id})`)
+                .join(", ")}\n` +
+              `💡 请按以下格式调用，确认或修改信息：\n` +
+              `\`\`\`\n` +
+              `create_iteration\n` +
+              `step: "project_info"\n` +
+              `data: "{\n` +
+              `  \\"productDoc\\": \\"请输入产品文档链接\\",\n` +
+              `  \\"technicalDoc\\": \\"请输入技术文档链接\\",\n` +
+              `  \\"projectDashboard\\": \\"请输入项目大盘链接\\",\n` +
+              `  \\"designDoc\\": \\"请输入设计文档链接\\",\n` +
+              `  \\"gitProjectUrl\\": \\"${gitInfo.projectUrl || ""}\\",\n` +
+              `  \\"gitProjectName\\": \\"${gitInfo.projectName || ""}\\",\n` +
+              `  \\"developmentBranch\\": \\"${
+                gitInfo.currentBranch || ""
+              }\\",\n` +
+              `  \\"participants\\": [\\"${cache.participants
+                .map((p) => p.id)
+                .join('\\", \\"')}\\"],\n` +
+              `  \\"reviewers\\": [\\"${cache.reviewers
+                .map((r) => r.id)
+                .join('\\", \\"')}\\"],\n` +
+              `  \\"workHours\\": ${gitInfo.estimatedWorkDays || 0},\n` +
+              `  \\"remarks\\": \\"请输入备注信息\\"\n` +
+              `}"\n` +
+              `\`\`\``,
+          },
+        ],
       };
     } catch (error) {
       throw new Error(`基础信息格式错误: ${error}`);
@@ -874,9 +885,9 @@ class IterationMCPServer {
       
       // 更新缓存中的参与人员和复审人员
       const participantIds = projectInfo.participants || [];
-      const reviewerIds = projectInfo.reviewers || [];
-      if (participantIds.length > 0 || reviewerIds.length > 0) {
-        this.cacheManager.updateRecentPersonnel(participantIds, reviewerIds);
+      const checkUserIds = projectInfo.reviewers || [];
+      if (participantIds.length > 0 || checkUserIds.length > 0) {
+        this.cacheManager.updateRecentPersonnel(participantIds, checkUserIds);
       }
       
       return {

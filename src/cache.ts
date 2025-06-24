@@ -71,7 +71,7 @@ export class CacheManager {
     
     // 从CR申请单中提取人员ID（适配两种数据格式）
     let participantIds: number[] = [];
-    let reviewerIds: number[] = [];
+    let checkUserIds: number[] = [];
     
     // 检查是否有API格式的数据
     if ((iteration.crApplication as any).participantIds) {
@@ -88,18 +88,18 @@ export class CacheManager {
     
     // 检查是否有API格式的数据
     if ((iteration.crApplication as any).checkUserIds) {
-      reviewerIds = (iteration.crApplication as any).checkUserIds
+      checkUserIds = (iteration.crApplication as any).checkUserIds
         .split(',')
         .map((id: string) => parseInt(id.trim()))
         .filter((id: number) => !isNaN(id));
     } else if ((iteration.crApplication as any).projectInfo?.reviewers) {
       // 使用收集格式的数据
-      reviewerIds = (iteration.crApplication as any).projectInfo.reviewers
+      checkUserIds = (iteration.crApplication as any).projectInfo.reviewers
         .map((id: string) => parseInt(id))
         .filter((id: number) => !isNaN(id));
     }
     
-    this.updateRecentPersonnel(participantIds, reviewerIds);
+    this.updateRecentPersonnel(participantIds, checkUserIds);
   }
 
   /**
@@ -189,7 +189,7 @@ export class CacheManager {
   /**
    * 更新最近使用的人员
    */
-  updateRecentPersonnel(participantIds: number[], reviewerIds: number[]): void {
+  updateRecentPersonnel(participantIds: number[], checkUserIds: number[]): void {
     const cache = this.getCache();
     
     // 更新最近使用的参与人员（保持最新的5个）
@@ -200,8 +200,8 @@ export class CacheManager {
     
     // 更新最近使用的审核人员（保持最新的5个）
     cache.recentReviewers = [
-      ...reviewerIds,
-      ...cache.recentReviewers.filter(id => !reviewerIds.includes(id))
+      ...checkUserIds,
+      ...cache.recentReviewers.filter(id => !checkUserIds.includes(id))
     ].slice(0, 5);
     
     this.saveCache(cache);
