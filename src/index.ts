@@ -33,7 +33,7 @@ import { DingTalkAuth } from './dingtalk.js';               // 钉钉认证模�
 import { CacheManager } from './cache.js';                  // 本地缓存管理
 import { APIManager } from './api.js';                      // API调用管理
 import { ConfigManager } from './config-manager.js';        // 外部配置和Token管理
-import { CompleteIteration } from './types.js';             // 类型定义
+import { CompleteIteration, UserInfo } from './types.js';             // 类型定义
 import { GitInfo } from './git-utils.js';                   // Git信息工具
 
 /**
@@ -429,31 +429,47 @@ class IterationMCPServer {
     this.sessionData = {};
     
     // 获取缓存中的用户数据
-    const cache = this.cacheManager.getCache();
-    const participants = await this.cacheManager.getParticipants();
-    const reviewers = await this.cacheManager.getReviewers();
+    let participants: UserInfo[] = [];
+    let reviewers: UserInfo[] = [];
     
-    // 尝试获取项目组列表（优化：从API实时获取）
+    // 尝试获取项目组和用户列表
     let projectListText = '';
     try {
-      if (this.apiManager) {
-        const projectList = await this.apiManager.getProjectList();
-        if (projectList && projectList.length > 0) {
-          projectListText = `📋 **可选项目组：**\n`;
-          projectList.forEach((project, index) => {
-            projectListText += `${index + 1}. ${project.name} (ID: ${project.id})\n`;
-          });
-          projectListText += `\n请在 projectLine 字段中填写完整的项目组名称。\n\n`;
-        } else {
-          projectListText = `⚠️ 未获取到项目组列表，请手动输入项目线名称。\n\n`;
-        }
+      // 主动获取API管理器，这将自动处理Token和配置加载
+      const apiManager = await this.getAPIManager();
+      console.log('apiManager', apiManager);
+      
+      // 获取项目组列表
+      const projectList = await apiManager.getProjectList();
+      if (projectList && projectList.length > 0) {
+        projectListText = `📋 **可选项目组：**\n`;
+        projectList.forEach((project, index) => {
+          projectListText += `${index + 1}. ${project.name} (ID: ${project.id})\n`;
+        });
+        projectListText += `\n请在 projectLine 字段中填写完整的项目组名称或ID。\n\n`;
       } else {
-        projectListText = `⚠️ API管理器未初始化，请先登录。建议手动输入项目线名称。\n\n`;
+        projectListText = `⚠️ 未获取到项目组列表，请手动输入项目线名称。\n\n`;
       }
+      
+      // 获取用户列表
+      participants = await apiManager.getUserList();
+      reviewers = participants; // 假设审核人和参与人是同一组
+
     } catch (error) {
-      console.error('获取项目组列表失败:', error);
-      projectListText = `⚠️ 获取项目组列表失败：${error instanceof Error ? error.message : String(error)}\n`;
-      projectListText += `📝 请手动输入项目线名称。\n\n`;
+      console.error('获取初始化数据失败:', error);
+      console.error('错误详情:', {
+        name: error instanceof Error ? error.constructor.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      
+      const errorMessage = `⚠️ API管理器未初始化，请先登录。建议手动输入项目线名称。\n`;
+      projectListText = errorMessage;
+      
+      // 如果API获取失败，回退到缓存数据
+      // const cache = this.cacheManager.getCache();
+      participants = await this.cacheManager.getParticipants();
+      reviewers = await this.cacheManager.getReviewers();
     }
     
     return {
@@ -466,7 +482,7 @@ class IterationMCPServer {
                 projectListText +
                 `1. **项目线** (支持两种输入方式):\n` +
                 `   - 输入项目ID (如: 1, 2, 3)\n` +
-                `   - 输入项目名称 (如: 医美, 行业, 前端框架)\n` +
+                `   - 输入项目名称 (如: 医美, 行业)\n` +
                 `2. **迭代名称** (例如：v1.2.0 用户体验优化迭代)\n` +
                 `3. **上线时间** (格式：YYYY-MM-DD)\n` +
                 `4. **备注** (可选)\n\n` +
@@ -482,11 +498,11 @@ class IterationMCPServer {
                 `}"\n` +
                 `\`\`\`\n\n` +
                 `📝 **项目线输入示例**：\n` +
-                `- 输入项目ID: \\"projectLine\\": \\"2\\"\n` +
-                `- 输入项目名称: \\"projectLine\\": \\"行业\\"\n\n` +
+                `- 输入项目ID: \`"projectLine": "2"\`\n` +
+                `- 输入项目名称: \`"projectLine": "行业"\`\n\n` +
                 `📊 **可用人员信息：**\n` +
-                `参与人员：${participants.map(p => `${p.realName}(${p.id})`).join(', ')}\n` +
-                `审核人员：${reviewers.map(r => `${r.realName}(${r.id})`).join(', ')}`
+                `参与人员：${participants.length > 0 ? participants.map(p => `${p.realName}(${p.id})`).join(', ') : '未获取到'}\n` +
+                `审核人员：${reviewers.length > 0 ? reviewers.map(r => `${r.realName}(${r.id})`).join(', ') : '未获取到'}`
         }
       ]
     };
@@ -823,18 +839,41 @@ class IterationMCPServer {
 
     console.log('🔧 正在初始化/刷新API管理器...');
     
-    // 优先使用会话Token
-    const token = this.sessionToken || await this.configManager.getToken();
-    const baseUrl = await this.configManager.getBaseUrl();
-    
-    // 将外部配置的baseUrl合并到主配置中
-    const apiConfig = { ...this.config.api, baseUrl };
-    const finalConfig = { ...this.config, api: apiConfig };
-    
-    this.apiManager = new APIManager(finalConfig, token);
-    console.log(`✅ API管理器已准备就绪 (API aBase: ${baseUrl})`);
-    
-    return this.apiManager;
+    try {
+      // 优先使用会话Token
+      const token = this.sessionToken || await this.configManager.getToken();
+      console.log(`✅ Token获取成功，长度: ${token.length}`);
+      
+      const baseUrl = await this.configManager.getBaseUrl();
+      console.log(`🌐 BaseUrl获取结果: "${baseUrl}"`);
+      
+      // 验证最终的API配置是否完整
+      if (!baseUrl || baseUrl.trim() === '') {
+        throw new Error('API配置不完整：baseUrl不能为空。请检查您的 mcp-config.json 文件中的 api.baseUrl 配置。');
+      }
+      
+      // 完全使用ConfigManager的配置，确保baseUrl正确
+      const finalConfig = {
+        ...this.config,
+        api: {
+          ...this.config.api,
+          baseUrl: baseUrl  // 强制使用ConfigManager获取的baseUrl
+        }
+      };
+      
+      this.apiManager = new APIManager(finalConfig, token);
+      console.log(`✅ API管理器已准备就绪 (API Base: ${baseUrl})`);
+      
+      return this.apiManager;
+    } catch (error) {
+      console.error('❌ API管理器初始化失败:', error);
+      console.error('详细错误信息:', {
+        errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
   }
 
   private async handleSubmitCompleteIteration(args: any) {
