@@ -1,7 +1,8 @@
 {
   "name": "@asthestarslept/iteration-mcp",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "MCP迭代管理工具",
+  "type": "module",
   "main": "dist/index.js",
   "bin": {
     "iteration-mcp": "dist/index.js"

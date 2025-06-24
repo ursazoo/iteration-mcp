@@ -13,16 +13,24 @@
       "command": "npx",
       "args": ["-y", "@asthestarslept/iteration-mcp"]
     },
+    "iteration-mcp-local": {
+      "command": "node",
+      "args": [
+        "/Users/rabbitsbear/project/fshows/ts-mcp/dist/index.js",
+        "--workdir",
+        "/Users/rabbitsbear/project/fshows/ts-mcp"
+      ],
+      "description": "本地开发版本的 MCP 迭代工具"
+    },
     "iteration-mcp-v2": {
-        "name": "iteration-mcp-v2",
-        "command": "npx",
-        "args": [
-            "-y",
-            "@asthestarslept/iteration-mcp",
-            "--workdir",
-            "/Users/rabbitsbear/project/fshows/ts-mcp"
-        ],
-        "description": "用于创建和管理迭代的MCP工具（指定工作目录）"
+      "command": "npx",
+      "args": [
+        "-y",
+        "@asthestarslept/iteration-mcp",
+        "--workdir",
+        "/Users/rabbitsbear/project/fshows/ts-mcp"
+      ],
+      "description": "用于创建和管理迭代的MCP工具（指定工作目录）"
     }
   }
 }
