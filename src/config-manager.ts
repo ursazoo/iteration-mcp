@@ -69,33 +69,27 @@ export class ConfigManager {
     }
 
     /**
-     * Finds the configuration file path by searching in prioritized locations.
+     * Finds the configuration file path by searching ONLY in user home directory.
+     * This ensures consistent configuration location across different working directories.
      * @returns The found file path or null if not found.
      */
     private findConfigFile(): string | null {
         const configNames = ['mcp-config.json', '.mcp-config.json'];
-        // Get __dirname equivalent in ESM
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = dirname(__filename);
         
-        const searchPaths = [
-            homedir(), // User home directory (highest priority)
-            process.cwd(), // Current working directory
-            path.join(__dirname, '..') // Project root directory
-        ];
-
-        for (const searchPath of searchPaths) {
-            for (const configName of configNames) {
-                const filePath = path.join(searchPath, configName);
-                if (fs.existsSync(filePath)) {
-                    console.log(`✅ 找到配置文件: ${filePath}`);
-                    return filePath;
-                }
+        // Only search in user home directory (compatible with Windows, Mac, Linux)
+        const homeDir = homedir();
+        
+        for (const configName of configNames) {
+            const filePath = path.join(homeDir, configName);
+            if (fs.existsSync(filePath)) {
+                console.log(`✅ 找到配置文件: ${filePath}`);
+                return filePath;
             }
         }
         
-        console.log(`❌ 在以下路径中未找到配置文件 (${configNames.join(', ')}):`);
-        searchPaths.forEach(p => console.log(`   - ${p}`));
+        console.log(`❌ 在用户主目录中未找到配置文件 (${configNames.join(', ')}):`);
+        console.log(`   - 搜索路径: ${homeDir}`);
+        console.log(`   - 期望文件: ${configNames.map(name => path.join(homeDir, name)).join(', ')}`);
         return null;
     }
 

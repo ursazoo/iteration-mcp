@@ -58,6 +58,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 // ==================== 业务模块导入 ====================
 import { loadConfig, validateConfig } from './config.js';    // 配置管理
@@ -609,9 +612,6 @@ class IterationMCPServer {
    * 在常见的项目路径中搜索Git仓库
    */
   private findPotentialProjectDirectories(): string[] {
-    const fs = require('fs');
-    const path = require('path');
-    const os = require('os');
     
     const possiblePaths = [
       // 用户主目录下的常见项目路径
@@ -762,7 +762,7 @@ class IterationMCPServer {
       // 更新缓存中的项目线
       this.cacheManager.updateProjectLine(basicInfo.projectLine);
       
-      // 暂时简化Git信息获取，避开__dirname问题
+      // 获取Git信息，使用GitUtils智能计算工时
       let gitInfo: GitInfo = {};
       let debugInfo = '';
       
@@ -776,20 +776,35 @@ class IterationMCPServer {
         debugInfo += `🔧 调试 - PWD环境变量: ${process.env.PWD}\n`;
         debugInfo += `🔧 调试 - INIT_CWD环境变量: ${process.env.INIT_CWD}\n`;
         
-        // 简单的目录名作为项目名
-        const projectName = workspaceRoot.split('/').pop() || 'Unknown Project';
+        // 使用GitUtils获取更准确的Git信息
+        const gitUtils = new (await import('./git-utils.js')).GitUtils(workspaceRoot);
+        const fullGitInfo = await gitUtils.getGitInfo();
+        
+        // 简单的目录名作为项目名（fallback）
+        const projectName = fullGitInfo.projectName || workspaceRoot.split('/').pop() || 'Unknown Project';
         gitInfo.projectName = projectName;
-        gitInfo.currentBranch = 'main'; // 默认分支
-        gitInfo.estimatedWorkDays = 7; // 默认工时
+        gitInfo.currentBranch = fullGitInfo.currentBranch || 'main';
+        gitInfo.projectUrl = fullGitInfo.projectUrl;
+        gitInfo.estimatedWorkDays = fullGitInfo.estimatedWorkDays || 7; // 使用智能计算，fallback为7天
         
         debugInfo += `✅ 项目名称: ${projectName}\n`;
-        debugInfo += `✅ 使用默认分支: main\n`;
-        debugInfo += `✅ 预估工时: 7 天\n`;
-        debugInfo += `✅ Git信息获取完成（简化版本）\n`;
+        debugInfo += `✅ 当前分支: ${gitInfo.currentBranch}\n`;
+        debugInfo += `✅ 项目地址: ${gitInfo.projectUrl || '未获取到'}\n`;
+        debugInfo += `✅ 智能预估工时: ${gitInfo.estimatedWorkDays} 天\n`;
+        debugInfo += `✅ Git信息获取完成（使用GitUtils智能分析）\n`;
         
       } catch (error) {
         debugInfo += `❌ Git信息获取失败: ${error}\n`;
-        gitInfo = {}; // 使用空对象作为fallback
+        // Git信息获取失败直接终止流程
+        throw new Error(
+          `Git信息获取失败，无法继续创建迭代:\n` +
+          `${debugInfo}\n\n` +
+          `请确保：\n` +
+          `1. 当前目录是一个有效的Git仓库\n` +
+          `2. Git环境配置正确\n` +
+          `3. 工作目录路径正确: ${this.config?.projectPath || process.cwd()}\n\n` +
+          `错误详情: ${error}`
+        );
       }
       
       const cache = this.cacheManager.getCache();
@@ -841,7 +856,13 @@ class IterationMCPServer {
       const projectInfo = JSON.parse(data);
       
       // 验证必填字段
-      const required = ['gitProjectUrl', 'gitProjectName', 'developmentBranch'];
+      const required = [
+        "gitProjectUrl",
+        "gitProjectName",
+        "developmentBranch",
+        "productDoc",
+        'technicalDoc',
+      ];
       for (const field of required) {
         if (!projectInfo[field]) {
           throw new Error(`${field} 为必填项`);
