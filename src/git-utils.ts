@@ -22,8 +22,26 @@ export interface GitInfo {
 export class GitUtils {
   private workspaceRoot: string;
 
-  constructor(workspaceRoot: string) {
-    this.workspaceRoot = workspaceRoot;
+  constructor(workspaceRoot?: string) {
+    // 自动检测工作目录，优先级：传递参数 > 环境变量 > 当前目录
+    this.workspaceRoot = workspaceRoot || this.detectWorkingDirectory();
+  }
+  
+  /**
+   * 自动检测工作目录
+   */
+  private detectWorkingDirectory(): string {
+    // 优先使用PWD环境变量，这通常是最准确的当前工作目录
+    const envWorkdir = process.env.PWD || process.env.INIT_CWD;
+    if (envWorkdir) {
+      console.log(`🔍 GitUtils使用环境变量检测的工作目录: ${envWorkdir}`);
+      return envWorkdir;
+    }
+    
+    // 回退到进程当前目录
+    const currentDir = process.cwd();
+    console.log(`🔍 GitUtils使用进程当前目录: ${currentDir}`);
+    return currentDir;
   }
 
   /**
