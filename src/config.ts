@@ -60,7 +60,7 @@ const MCP_CONFIG: MCPConfig = {
     },
   },
   
-  // 项目路径配置（可选）
+  // 项目路径配置（自动检测，可被动态覆盖）
   projectPath: process.cwd()
 };
 
