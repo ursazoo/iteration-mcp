@@ -18,9 +18,11 @@
         "command": "npx",
         "args": [
             "-y",
-            "@asthestarslept/iteration-mcp"
+            "@asthestarslept/iteration-mcp",
+            "--workdir",
+            "/Users/rabbitsbear/project/fshows/ts-mcp"
         ],
-        "description": "用于创建和管理迭代的MCP工具"
+        "description": "用于创建和管理迭代的MCP工具（指定工作目录）"
     }
   }
 }
