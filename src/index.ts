@@ -756,7 +756,7 @@ class IterationMCPServer {
 
       // 获取缓存中的用户数据
       let participants: UserInfo[] = [];
-      let reviewers: UserInfo[] = [];
+      let checkUsers: UserInfo[] = [];
 
       try {
         // 使用自动检测的工作目录
@@ -809,7 +809,7 @@ class IterationMCPServer {
       // 主动获取API管理器，这将自动处理Token和配置加载
       const apiManager = await this.getAPIManager();
       participants = await apiManager.getUserList();
-      reviewers = participants; // 假设审核人和参与人是同一组
+      checkUsers = participants; // 假设审核人和参与人是同一组
       const cache = this.cacheManager.getCache();
 
       return {
@@ -847,7 +847,7 @@ class IterationMCPServer {
               `  \\"participants\\": [\\"${cache.participants
                 .map((p) => p.id)
                 .join('\\", \\"')}\\"],\n` +
-              `  \\"reviewers\\": [\\"${cache.reviewers
+              `  \\"checkUsers\\": [\\"${cache.checkUsers
                 .map((r) => r.id)
                 .join('\\", \\"')}\\"],\n` +
               `  \\"workHours\\": ${gitInfo.estimatedWorkDays || 0},\n` +
@@ -885,7 +885,7 @@ class IterationMCPServer {
       
       // 更新缓存中的参与人员和复审人员
       const participantIds = projectInfo.participants || [];
-      const checkUserIds = projectInfo.reviewers || [];
+      const checkUserIds = projectInfo.checkUsers || [];
       if (participantIds.length > 0 || checkUserIds.length > 0) {
         this.cacheManager.updateRecentPersonnel(participantIds, checkUserIds);
       }
@@ -893,34 +893,39 @@ class IterationMCPServer {
       return {
         content: [
           {
-            type: 'text',
-            text: `✅ 项目信息已收集\n\n` +
-                  `📋 **第三步：模块信息**\n` +
-                  `请提供组件模块和功能模块信息：\n\n` +
-                  `💡 请按以下格式调用：\n` +
-                  `\`\`\`\n` +
-                  `create_iteration\n` +
-                  `step: "modules"\n` +
-                  `data: "{\n` +
-                  `  \\"componentModules\\": [\n` +
-                  `    {\n` +
-                  `      \\"name\\": \\"用户登录组件\\",\n` +
-                  `      \\"relativePath\\": \\"src/components/Login.tsx\\",\n` +
-                  `      \\"reviewer\\": \\"${projectInfo.reviewers?.[0] || 'r001'}\\",\n` +
-                  `      \\"image\\": { \\"type\\": \\"upload_later\\" }\n` +
-                  `    }\n` +
-                  `  ],\n` +
-                  `  \\"functionModules\\": [\n` +
-                  `    {\n` +
-                  `      \\"name\\": \\"用户认证功能\\",\n` +
-                  `      \\"reviewer\\": \\"${projectInfo.reviewers?.[0] || 'r001'}\\",\n` +
-                  `      \\"description\\": \\"实现JWT认证和权限控制\\"\n` +
-                  `    }\n` +
-                  `  ]\n` +
-                  `}"\n` +
-                  `\`\`\``
-          }
-        ]
+            type: "text",
+            text:
+              `✅ 项目信息已收集\n\n` +
+              `📋 **第三步：模块信息**\n` +
+              `请提供组件模块和功能模块信息：\n\n` +
+              `💡 请按以下格式调用：\n` +
+              `\`\`\`\n` +
+              `create_iteration\n` +
+              `step: "modules"\n` +
+              `data: "{\n` +
+              `  \\"componentModules\\": [\n` +
+              `    {\n` +
+              `      \\"name\\": \\"用户登录组件\\",\n` +
+              `      \\"relativePath\\": \\"src/components/Login.tsx\\",\n` +
+              `      \\"checkUser\\": \\"${
+                projectInfo.checkUsers?.[0] || "r001"
+              }\\",\n` +
+              `      \\"image\\": { \\"type\\": \\"upload_later\\" }\n` +
+              `    }\n` +
+              `  ],\n` +
+              `  \\"functionModules\\": [\n` +
+              `    {\n` +
+              `      \\"name\\": \\"用户认证功能\\",\n` +
+              `      \\"checkUser\\": \\"${
+                projectInfo.checkUsers?.[0] || "r001"
+              }\\",\n` +
+              `      \\"description\\": \\"实现JWT认证和权限控制\\"\n` +
+              `    }\n` +
+              `  ]\n` +
+              `}"\n` +
+              `\`\`\``,
+          },
+        ],
       };
     } catch (error) {
       throw new Error(`项目信息格式错误: ${error}`);
@@ -953,7 +958,7 @@ class IterationMCPServer {
             participantIds:
               this.sessionData.projectInfo.participants || [].join(","),
             checkUserIds:
-              this.sessionData.projectInfo.reviewers || [].join(","),
+              this.sessionData.projectInfo.checkUsers || [].join(","),
             startDate: new Date().toISOString().split("T")[0],
             endDate: this.sessionData.basicInfo.onlineTime,
             description: this.sessionData.projectInfo.remarks || "",

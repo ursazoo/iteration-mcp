@@ -105,15 +105,15 @@ export class APIManager {
     const componentList = componentModules.map((module: any) => ({
       name: module.name || '', // 使用name而不是componentName
       address: module.relativePath || '',
-      auditId: parseInt(module.reviewer) || 0,
+      auditId: parseInt(module.checkUser) || 0,
       imgUrl: '' // 暂时为空，待上传图片
     }));
     
     // 转换功能模块为API格式
     const functionList = functionModules.map((module: any) => ({
-      name: module.name || '', // 功能名称
-      desc: module.description || '', // 功能描述
-      auditId: parseInt(module.reviewer) || 0 // 审核人员ID
+      name: module.name || "", // 功能名称
+      desc: module.description || "", // 功能描述
+      auditId: parseInt(module.checkUser) || 0, // 审核人员ID
     }));
     
     return {
@@ -124,8 +124,8 @@ export class APIManager {
       gitlabUrl: projectInfo.gitProjectUrl || "",
       gitProjectName: projectInfo.projectName || "",
       gitlabBranch: projectInfo.developmentBranch || "main",
-      participantIds: projectInfo.participantIds || "",
-      checkUserIds: projectInfo.checkUserIds || "",
+      participantIds: Array.isArray(projectInfo.participantIds) ? projectInfo.participantIds.join(',') : projectInfo.participantIds || "",
+      checkUserIds: Array.isArray(projectInfo.checkUserIds) ? projectInfo.checkUserIds.join(',') : projectInfo.checkUserIds || "",
       spendTime: (projectInfo.workHours || 0).toString(),
       componentList,
       functionList,
@@ -364,12 +364,21 @@ export class APIManager {
         data: response.data
       }, null, 2));
       
-      if (response.data.success || Array.isArray(response.data)) {
-        // 兼容不同的响应格式
-        const userData = response.data.data?.list || response.data.data || response.data;
-        return userData;
+      // 检查API响应是否成功
+      if (response.data && (response.data.success || Array.isArray(response.data))) {
+        // 尝试从多个可能的结构中提取用户列表
+        const userList = response.data.data?.list || response.data.data || response.data;
+
+        // 最终验证，确保返回的是数组
+        if (Array.isArray(userList)) {
+            return userList;
+        }
+
+        // 如果 `userList` 不是数组（例如，当响应是 { success: true } 时），记录警告并返回空数组
+        console.warn(`getUserList: API响应成功但未找到有效的用户数组，将返回空列表。响应:`, response.data);
+        return [];
       } else {
-        const errorMsg = response.data.message || response.data.errorMsg || response.data.msg || '未知错误';
+        const errorMsg = response.data.message || response.data.errorMsg || response.data.msg || '获取用户列表时发生未知服务端错误';
         throw new Error(`获取用户列表失败: ${errorMsg} (完整响应: ${JSON.stringify(response.data)})`);
       }
     } catch (error) {
@@ -378,7 +387,7 @@ export class APIManager {
         const responseData = error.response?.data ? JSON.stringify(error.response.data) : '无响应数据';
         throw new Error(`API调用失败: ${errorMsg} (HTTP ${error.response?.status}) (响应: ${responseData})`);
       }
-      throw error;
+      throw error; // Re-throw other errors
     }
   }
 

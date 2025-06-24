@@ -1,5 +1,5 @@
 import { LocalCache, UserInfo, MCPConfig, CompleteIteration, CRApplicationData } from './types.js';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import axios from 'axios';
@@ -26,11 +26,11 @@ export class CacheManager {
   async generateCRApplicationTemplate(): Promise<CRApplicationData> {
     const cache = this.getCache();
     const participants = await this.getParticipants();
-    const reviewers = await this.getReviewers();
+    const checkUsers = await this.getCheckUsers();
     
     // 获取最近使用的人员作为默认值
     const recentParticipants = cache.recentParticipants.slice(0, 2);
-    const recentReviewers = cache.recentReviewers.slice(0, 1);
+    const recentCheckUsers = cache.recentCheckUsers.slice(0, 1);
     
     return {
       reqDocUrl: "",
@@ -41,13 +41,13 @@ export class CacheManager {
       gitProjectName: "",
       gitlabBranch: "",
       participantIds: recentParticipants.join(','),
-      checkUserIds: recentReviewers.join(','),
+      checkUserIds: recentCheckUsers.join(','),
       spendTime: "4",
       componentList: [
         {
           componentName: "",
           address: "",
-          auditId: recentReviewers[0] || 1,
+          auditId: recentCheckUsers[0] || 1,
           imgUrl: ""
         }
       ],
@@ -92,9 +92,9 @@ export class CacheManager {
         .split(',')
         .map((id: string) => parseInt(id.trim()))
         .filter((id: number) => !isNaN(id));
-    } else if ((iteration.crApplication as any).projectInfo?.reviewers) {
+    } else if ((iteration.crApplication as any).projectInfo?.checkUsers) {
       // 使用收集格式的数据
-      checkUserIds = (iteration.crApplication as any).projectInfo.reviewers
+      checkUserIds = (iteration.crApplication as any).projectInfo.checkUsers
         .map((id: string) => parseInt(id))
         .filter((id: number) => !isNaN(id));
     }
@@ -106,24 +106,42 @@ export class CacheManager {
    * 获取缓存数据
    */
   getCache(): LocalCache {
+    const defaults = this.getDefaultCache();
     if (!existsSync(CACHE_PATH)) {
-      return this.getDefaultCache();
+      return defaults;
     }
 
     try {
       const content = readFileSync(CACHE_PATH, 'utf8');
-      const cache = JSON.parse(content) as LocalCache;
+      // 如果文件内容为空，也返回默认缓存
+      if (!content.trim()) {
+        return defaults;
+      }
+      const loadedCache = JSON.parse(content);
+      
+      // 合并加载的缓存和默认缓存，确保所有字段都存在
+      const mergedCache: LocalCache = {
+        ...defaults,
+        ...loadedCache,
+      };
       
       // 检查缓存是否过期
-      if (Date.now() - cache.lastUpdated > CACHE_EXPIRE_TIME) {
+      if (Date.now() - mergedCache.lastUpdated > CACHE_EXPIRE_TIME) {
         console.log('缓存已过期，将在后台更新...');
         this.refreshPersonnelData(); // 异步更新
       }
       
-      return cache;
+      return mergedCache;
     } catch (error) {
-      console.error('读取缓存失败:', error);
-      return this.getDefaultCache();
+      console.error('读取或解析缓存失败，将使用默认缓存:', error);
+      // 如果解析失败，删除损坏的缓存文件，避免下次再次失败
+      try {
+        unlinkSync(CACHE_PATH);
+        console.log('已删除损坏的缓存文件:', CACHE_PATH);
+      } catch (unlinkError) {
+        console.error('删除损坏的缓存文件失败:', unlinkError);
+      }
+      return defaults;
     }
   }
 
@@ -157,31 +175,31 @@ export class CacheManager {
   /**
    * 获取审核人员列表（带缓存）
    */
-  async getReviewers(): Promise<UserInfo[]> {
+  async getCheckUsers(): Promise<UserInfo[]> {
     const cache = this.getCache();
     
     // 如果缓存为空或过期，从API获取
-    if (cache.reviewers.length === 0 || this.isCacheExpired(cache)) {
+    if (cache.checkUsers.length === 0 || this.isCacheExpired(cache)) {
       await this.refreshPersonnelData();
-      return this.getCache().reviewers;
+      return this.getCache().checkUsers;
     }
     
-    return cache.reviewers;
+    return cache.checkUsers;
   }
 
   /**
    * 根据ID获取用户信息
    */
-  async getUserInfo(id: number, type: 'participant' | 'reviewer' = 'participant'): Promise<UserInfo | null> {
-    const users = type === 'participant' ? await this.getParticipants() : await this.getReviewers();
+  async getUserInfo(id: number, type: 'participant' | 'checkUser' = 'participant'): Promise<UserInfo | null> {
+    const users = type === 'participant' ? await this.getParticipants() : await this.getCheckUsers();
     return users.find(user => user.id === id) || null;
   }
 
   /**
    * 根据姓名获取用户ID
    */
-  async getUserIdByName(name: string, type: 'participant' | 'reviewer' = 'participant'): Promise<number | null> {
-    const users = type === 'participant' ? await this.getParticipants() : await this.getReviewers();
+  async getUserIdByName(name: string, type: 'participant' | 'checkUser' = 'participant'): Promise<number | null> {
+    const users = type === 'participant' ? await this.getParticipants() : await this.getCheckUsers();
     const user = users.find(user => user.realName === name);
     return user ? user.id : null;
   }
@@ -199,9 +217,9 @@ export class CacheManager {
     ].slice(0, 5);
     
     // 更新最近使用的审核人员（保持最新的5个）
-    cache.recentReviewers = [
+    cache.recentCheckUsers = [
       ...checkUserIds,
-      ...cache.recentReviewers.filter(id => !checkUserIds.includes(id))
+      ...cache.recentCheckUsers.filter(id => !checkUserIds.includes(id))
     ].slice(0, 5);
     
     this.saveCache(cache);
@@ -281,7 +299,7 @@ export class CacheManager {
       const cache = this.getCache();
       // 所有用户都可以是参与者和审核者
       cache.participants = users;
-      cache.reviewers = users;
+      cache.checkUsers = users;
       
       this.saveCache(cache);
       console.log('人员信息更新完成');
@@ -341,10 +359,10 @@ export class CacheManager {
     return {
       projectLines: [],
       participants: [],
-      reviewers: [],
+      checkUsers: [],
       recentParticipants: [],
-      recentReviewers: [],
-      lastUpdated: 0
+      recentCheckUsers: [],
+      lastUpdated: 0,
     };
   }
 } 

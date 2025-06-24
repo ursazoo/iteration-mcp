@@ -12,7 +12,7 @@ export interface GitInfo {
   projectDashboard?: string;
   designDoc?: string;
   participants?: string[];
-  reviewers?: string[];
+  checkUsers?: string[];
   remarks?: string;
 }
 

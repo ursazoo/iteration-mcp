@@ -47,7 +47,7 @@ export interface ComponentModule {
   name: string;              // 组件名称
   url?: string;             // 组件地址
   relativePath: string;      // 项目内相对路径
-  reviewer: string;          // 审核人员ID
+  checkUser: string;          // 审核人员ID
   image?: {
     type: 'clipboard' | 'file' | 'upload_later';
     value?: string;          // 文件路径或上传链接
@@ -57,7 +57,7 @@ export interface ComponentModule {
 export interface FunctionModule {
   name: string;              // 功能名称
   relativePath: string;      // 项目内相对路径
-  reviewer: string;          // 审核人员ID
+  checkUser: string;          // 审核人员ID
   description?: string;      // 功能描述
 }
 
@@ -172,17 +172,17 @@ export interface MCPConfig {
 
 // 本地缓存数据
 export interface LocalCache {
-  projectLines: string[];           // 项目线选项
-  defaultProjectLine?: string;      // 默认项目线
-  participants: UserInfo[];         // 参与人员列表（从API缓存）
-  reviewers: UserInfo[];           // 审核人员列表（从API缓存）
-  recentParticipants: number[];    // 最近使用的参与人员ID
-  recentReviewers: number[];       // 最近使用的审核人员ID
+  projectLines: string[]; // 项目线选项
+  defaultProjectLine?: string; // 默认项目线
+  participants: UserInfo[]; // 参与人员列表（从API缓存）
+  checkUsers: UserInfo[]; // 审核人员列表（从API缓存）
+  recentParticipants: number[]; // 最近使用的参与人员ID
+  recentCheckUsers: number[]; // 最近使用的审核人员ID
   gitInfo?: {
     projectUrl: string;
     projectName: string;
   };
-  lastUpdated: number;             // 缓存更新时间
+  lastUpdated: number; // 缓存更新时间
 }
 
 // 登录结果类型
