@@ -188,7 +188,7 @@ class IterationMCPServer {
                 },
                 workdir: {
                   type: 'string',
-                  description: '可选：当前工作目录路径，用于覆盖自动检测的路径'
+                  description: '可选：手动指定工作目录路径，默认自动检测当前目录'
                 }
               },
               required: ['step']
@@ -377,9 +377,12 @@ class IterationMCPServer {
   private async handleCreateIteration(args: any) {
     const { step, data, workdir } = args;
     
-    // 如果提供了workdir参数，临时设置到config中（用于Git信息获取）
-    if (workdir && this.config) {
-      this.config.projectPath = workdir;
+    // 自动检测工作目录，优先级：手动传递 > 环境变量 > 进程当前目录
+    const detectedWorkdir = this.detectWorkingDirectory(workdir);
+    
+    // 设置到config中供Git信息获取使用
+    if (this.config) {
+      this.config.projectPath = detectedWorkdir;
     }
     
     try {
@@ -410,6 +413,38 @@ class IterationMCPServer {
         ]
       };
     }
+  }
+
+  /**
+   * 自动检测工作目录
+   * 优先级：
+   * 1. 手动传递的workdir参数（最高优先级）
+   * 2. 环境变量（PWD、INIT_CWD等）
+   * 3. 进程当前目录process.cwd()（最低优先级）
+   * 
+   * @param manualWorkdir 手动传递的工作目录
+   * @returns 检测到的工作目录路径
+   */
+  private detectWorkingDirectory(manualWorkdir?: string): string {
+    console.log('🔍 开始自动检测工作目录...');
+    
+    // 优先级1：手动传递的workdir参数
+    if (manualWorkdir) {
+      console.log(`✅ 使用手动传递的工作目录: ${manualWorkdir}`);
+      return manualWorkdir;
+    }
+    
+    // 优先级2：环境变量检测
+    const envWorkdir = process.env.PWD || process.env.INIT_CWD;
+    if (envWorkdir) {
+      console.log(`✅ 使用环境变量检测的工作目录: ${envWorkdir}`);
+      return envWorkdir;
+    }
+    
+    // 优先级3：进程当前目录（最低优先级）
+    const currentDir = process.cwd();
+    console.log(`✅ 使用进程当前目录作为工作目录: ${currentDir}`);
+    return currentDir;
   }
 
   /**
@@ -530,24 +565,16 @@ class IterationMCPServer {
       try {
         const { execSync } = await import('child_process');
         
-        // 尝试多种方式获取工作目录
-        let workspaceRoot = this.config?.projectPath;
+        // 使用自动检测的工作目录（已在handleCreateIteration中设置）
+        const workspaceRoot = this.config?.projectPath || process.cwd();
+        debugInfo += `🔧 使用工作目录: ${workspaceRoot}\n`;
         
-        // 如果配置中没有projectPath，尝试从环境变量获取
-        if (!workspaceRoot) {
-          // 尝试从不同的环境变量获取
-          workspaceRoot = process.env.PWD || process.env.INIT_CWD || process.cwd();
-          debugInfo += `🔍 从环境变量获取工作目录: ${workspaceRoot}\n`;
-        }
-        
-        // 检查是否是一个有效的项目目录（包含.git或package.json等）
+        // 检查目录是否存在
         const fs = await import('fs');
         if (!fs.existsSync(workspaceRoot)) {
           debugInfo += `❌ 工作目录不存在: ${workspaceRoot}\n`;
-          workspaceRoot = process.cwd(); // 回退到进程当前目录
-          debugInfo += `🔄 回退到进程当前目录: ${workspaceRoot}\n`;
+          throw new Error(`工作目录不存在: ${workspaceRoot}`);
         }
-        debugInfo += `🔧 使用工作目录: ${workspaceRoot}\n`;
         const execOptions = { encoding: 'utf-8' as const, cwd: workspaceRoot };
         
         // 检查工作目录是否是git仓库
