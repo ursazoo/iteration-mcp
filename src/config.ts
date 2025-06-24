@@ -89,7 +89,7 @@ export function loadConfig(): MCPConfig {
  * 
  * 验证项目：
  * 1. 钉钉配置：appId 和 appSecret 必须存在
- * 2. API配置：baseUrl 必须存在
+ * 2. API配置：baseUrl 可以为空，将从外部配置加载
  * 3. 接口端点：确保关键接口配置正确
  */
 export function validateConfig(config: MCPConfig): void {
@@ -98,9 +98,9 @@ export function validateConfig(config: MCPConfig): void {
     console.warn('⚠️ 钉钉配置使用默认值，请在 src/config.ts 中替换为实际的 appId 和 appSecret');
   }
   
-  // 验证API基础配置
-  if (!config.api?.baseUrl) {
-    throw new Error('API 配置缺失: 需要 baseUrl');
+  // 验证API基础配置 - baseUrl 可以为空，将从外部配置加载
+  if (!config.api) {
+    throw new Error('API 配置缺失: 需要 api 对象');
   }
   
   // 验证关键接口端点

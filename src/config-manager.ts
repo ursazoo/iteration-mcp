@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { homedir } from 'os';
 
 /**
  * Manages configuration acquisition with a priority-based strategy.
@@ -70,17 +71,25 @@ export class ConfigManager {
      * @returns The found file path or null if not found.
      */
     private findConfigFile(): string | null {
-        const configName = 'mcp-config.json';
+        const configNames = ['mcp-config.json', '.mcp-config.json'];
         const searchPaths = [
-            path.join(process.cwd(), configName),
-            path.join(__dirname, '..', configName) 
+            homedir(), // User home directory (highest priority)
+            process.cwd(), // Current working directory
+            path.join(__dirname, '..') // Project root directory
         ];
 
-        for (const p of searchPaths) {
-            if (fs.existsSync(p)) {
-                return p;
+        for (const searchPath of searchPaths) {
+            for (const configName of configNames) {
+                const filePath = path.join(searchPath, configName);
+                if (fs.existsSync(filePath)) {
+                    console.log(`✅ 找到配置文件: ${filePath}`);
+                    return filePath;
+                }
             }
         }
+        
+        console.log(`❌ 在以下路径中未找到配置文件 (${configNames.join(', ')}):`);
+        searchPaths.forEach(p => console.log(`   - ${p}`));
         return null;
     }
 
