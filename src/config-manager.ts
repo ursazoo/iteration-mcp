@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 /**
  * Manages configuration acquisition with a priority-based strategy.
@@ -72,6 +74,10 @@ export class ConfigManager {
      */
     private findConfigFile(): string | null {
         const configNames = ['mcp-config.json', '.mcp-config.json'];
+        // Get __dirname equivalent in ESM
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = dirname(__filename);
+        
         const searchPaths = [
             homedir(), // User home directory (highest priority)
             process.cwd(), // Current working directory
