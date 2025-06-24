@@ -427,6 +427,7 @@ class IterationMCPServer {
    */
   private detectWorkingDirectory(manualWorkdir?: string): string {
     console.log('🔍 开始自动检测工作目录...');
+    console.log(`🔧 调试信息: PWD=${process.env.PWD}, INIT_CWD=${process.env.INIT_CWD}, process.cwd()=${process.cwd()}`);
     
     // 优先级1：手动传递的workdir参数
     if (manualWorkdir) {
@@ -436,15 +437,75 @@ class IterationMCPServer {
     
     // 优先级2：环境变量检测
     const envWorkdir = process.env.PWD || process.env.INIT_CWD;
-    if (envWorkdir) {
+    if (envWorkdir && envWorkdir !== '/') {
       console.log(`✅ 使用环境变量检测的工作目录: ${envWorkdir}`);
       return envWorkdir;
     }
     
-    // 优先级3：进程当前目录（最低优先级）
+    // 优先级3：进程当前目录
     const currentDir = process.cwd();
-    console.log(`✅ 使用进程当前目录作为工作目录: ${currentDir}`);
-    return currentDir;
+    if (currentDir !== '/') {
+      console.log(`✅ 使用进程当前目录作为工作目录: ${currentDir}`);
+      return currentDir;
+    }
+    
+    // 优先级4：如果都是根目录，尝试智能搜索项目目录
+    const potentialDirs = this.findPotentialProjectDirectories();
+    if (potentialDirs.length > 0) {
+      console.log(`✅ 找到可能的项目目录，使用: ${potentialDirs[0]}`);
+      return potentialDirs[0];
+    }
+    
+    // 优先级5：最后的fallback - 提示用户手动指定
+    console.warn(`⚠️ 无法自动检测工作目录，请手动指定workdir参数`);
+    return process.cwd(); // 返回当前目录作为最后的选择
+  }
+
+  /**
+   * 尝试寻找可能的项目目录
+   * 在常见的项目路径中搜索Git仓库
+   */
+  private findPotentialProjectDirectories(): string[] {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    
+    const possiblePaths = [
+      // 用户主目录下的常见项目路径
+      path.join(os.homedir(), 'project'),
+      path.join(os.homedir(), 'projects'),
+      path.join(os.homedir(), 'workspace'),
+      path.join(os.homedir(), 'dev'),
+      path.join(os.homedir(), 'code'),
+      // 其他可能的路径
+      '/usr/src',
+      '/opt',
+    ];
+    
+    const validDirs: string[] = [];
+    
+    for (const basePath of possiblePaths) {
+      try {
+        if (fs.existsSync(basePath)) {
+          // 扫描子目录，寻找包含.git的目录
+          const subdirs = fs.readdirSync(basePath, { withFileTypes: true })
+            .filter((dirent: any) => dirent.isDirectory())
+            .map((dirent: any) => path.join(basePath, dirent.name));
+          
+          for (const subdir of subdirs) {
+            const gitPath = path.join(subdir, '.git');
+            if (fs.existsSync(gitPath)) {
+              validDirs.push(subdir);
+            }
+          }
+        }
+      } catch (error) {
+        // 忽略权限错误等
+        console.log(`跳过路径 ${basePath}: ${error}`);
+      }
+    }
+    
+    return validDirs;
   }
 
   /**
@@ -568,6 +629,8 @@ class IterationMCPServer {
         // 使用自动检测的工作目录（已在handleCreateIteration中设置）
         const workspaceRoot = this.config?.projectPath || process.cwd();
         debugInfo += `🔧 使用工作目录: ${workspaceRoot}\n`;
+        debugInfo += `🔧 config.projectPath: ${this.config?.projectPath}\n`;
+        debugInfo += `🔧 process.cwd(): ${process.cwd()}\n`;
         
         // 检查目录是否存在
         const fs = await import('fs');
