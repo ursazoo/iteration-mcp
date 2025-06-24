@@ -110,7 +110,42 @@ export class GitUtils {
   private readGitConfigFile(): { git_project_url?: string; git_project_name?: string } | null {
     console.log('🔍 开始读取Git配置文件...');
     
-    // 首先尝试读取JSON格式配置文件
+    // 首先尝试读取iteration-mcp.config文件（键值对格式）
+    const iterationConfigPath = path.join(this.workspaceRoot, 'iteration-mcp.config');
+    console.log(`🔍 检查iteration-mcp.config文件: ${iterationConfigPath}`);
+    
+    if (fs.existsSync(iterationConfigPath)) {
+      console.log('✅ 找到iteration-mcp.config文件');
+      try {
+        const configContent = fs.readFileSync(iterationConfigPath, 'utf-8');
+        console.log(`📄 配置文件内容: ${configContent}`);
+        
+        const config: Record<string, string> = {};
+        const lines = configContent.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#')) {
+            const [key, value] = trimmed.split('=');
+            if (key && value) {
+              config[key.trim()] = value.trim();
+            }
+          }
+        }
+        
+        const result = {
+          git_project_url: config.git_project_url,
+          git_project_name: config.git_project_name
+        };
+        console.log(`✅ 解析结果:`, result);
+        return result;
+      } catch (error) {
+        console.warn('⚠️ 读取iteration-mcp.config文件失败:', error);
+      }
+    } else {
+      console.log('⚠️ iteration-mcp.config文件不存在');
+    }
+    
+    // 然后尝试读取JSON格式配置文件
     const jsonConfigPath = path.join(this.workspaceRoot, 'git_info.config.json');
     console.log(`🔍 检查JSON配置文件: ${jsonConfigPath}`);
     
@@ -136,7 +171,7 @@ export class GitUtils {
       console.log('⚠️ JSON配置文件不存在');
     }
 
-          // 如果没有配置文件，尝试从git remote获取
+    // 如果没有配置文件，尝试从git remote获取
     console.log('🔍 尝试从git remote获取项目信息...');
     return this.getGitRemoteInfo();
   }
@@ -213,7 +248,7 @@ export class GitUtils {
             const createDate = new Date(branchCreateTime);
             const currentDate = new Date();
             const diffDays = Math.ceil((currentDate.getTime() - createDate.getTime()) / (1000 * 60 * 60 * 24));
-            workDays = Math.min(Math.max(diffDays, 1), 30); // 限制在1-30天之间
+            workDays = Math.max(diffDays, 1); // 最小1天
             console.log(`🌿 分支创建时间: ${branchCreateTime}, 计算天数: ${diffDays}`);
           } else {
             throw new Error('无法找到merge-base');
@@ -231,7 +266,7 @@ export class GitUtils {
               const firstDate = new Date(branchFirstCommit);
               const currentDate = new Date();
               const diffDays = Math.ceil((currentDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
-              workDays = Math.min(Math.max(diffDays, 1), 30);
+              workDays = Math.max(diffDays, 1);
               console.log(`📅 分支第一次提交: ${branchFirstCommit}, 计算天数: ${diffDays}`);
             } else {
               throw new Error('无法获取第一次提交');
@@ -244,18 +279,31 @@ export class GitUtils {
               encoding: 'utf-8' 
             }).trim();
             const commitCount = parseInt(recentCommits) || 0;
-            workDays = Math.max(Math.ceil(commitCount / 3), 3);
+            workDays = Math.max(Math.ceil(commitCount / 3), 1);
           }
         }
       } else {
-        // 主分支：根据最近活动估算
-        const recentCommits = execSync('git log --since="30 days ago" --oneline | wc -l', { 
-          cwd: this.workspaceRoot || process.cwd(),
-          encoding: 'utf-8' 
-        }).trim();
-        const commitCount = parseInt(recentCommits) || 0;
-        workDays = commitCount > 0 ? Math.max(Math.ceil(commitCount / 3), 3) : 7;
-        console.log(`📊 最近30天提交数: ${commitCount}, 估算工时: ${workDays}天`);
+        // 主分支：根据项目实际开发时间估算
+        try {
+          // 获取第一次提交时间
+          const firstCommit = execSync('git log --reverse --format=%ai | head -1', { 
+            cwd: this.workspaceRoot || process.cwd(),
+            encoding: 'utf-8' 
+          }).trim();
+          
+          if (firstCommit) {
+            const firstDate = new Date(firstCommit);
+            const currentDate = new Date();
+            const projectDays = Math.ceil((currentDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+            workDays = Math.max(projectDays, 1); // 最小1天
+            console.log(`📅 项目开始时间: ${firstCommit}, 项目实际天数: ${projectDays}`);
+          } else {
+            throw new Error('无法获取第一次提交');
+          }
+        } catch (error) {
+          console.warn('⚠️ 无法获取项目开始时间，使用默认值');
+          workDays = 1; // 默认1天
+        }
       }
       
       return workDays;
