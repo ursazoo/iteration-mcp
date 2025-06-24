@@ -118,6 +118,7 @@ class IterationMCPServer {
     basicInfo?: any;
     projectInfo?: any;
     modules?: any;
+    gitInfo?: GitInfo;
   } = {};
 
   /**
@@ -215,22 +216,32 @@ class IterationMCPServer {
   private initializeWorkspaceRoots() {
     // 如果还没有workspace roots，尝试从环境变量或当前目录设置
     if (this.workspaceRoots.length === 0) {
-      // 首先尝试从环境变量获取
-      const envWorkdir = process.env.PWD || process.env.INIT_CWD;
-      if (envWorkdir && envWorkdir !== '/') {
-        const fileUri = `file://${envWorkdir}`;
-        this.setWorkspaceRoots([fileUri]);
-        console.log(`🔍 从环境变量初始化workspace根目录: ${envWorkdir}`);
+      // 终端环境中，process.env.PWD 通常指向用户当前所在的目录
+      // 而 process.cwd() 指向脚本执行的目录。
+      // 当全局安装的脚本被调用时，process.cwd()可能是脚本的安装位置，而不是用户的工作目录。
+      // 因此，我们优先使用 process.env.PWD
+      const executionPath = process.cwd();
+      const invocationPath = process.env.PWD;
+
+      console.log(`[调试] 脚本执行目录 (cwd): ${executionPath}`);
+      console.log(`[调试] 命令调用目录 (PWD): ${invocationPath}`);
+
+      let effectivePath: string | undefined;
+
+      if (invocationPath && invocationPath !== executionPath && fs.existsSync(invocationPath)) {
+        console.log(`[信息] 检测到命令调用目录与脚本执行目录不同，优先使用调用目录。`);
+        effectivePath = invocationPath;
       } else {
-        // 最后回退到process.cwd()，但要检查是否合理
-        const currentDir = process.cwd();
-        if (currentDir !== '/') {
-          const fileUri = `file://${currentDir}`;
-          this.setWorkspaceRoots([fileUri]);
-          console.log(`🔍 从进程目录初始化workspace根目录: ${currentDir}`);
-        } else {
-          console.warn('⚠️ 无法确定有效的workspace根目录，请确保在正确的项目目录中运行');
-        }
+        console.log(`[信息] 使用脚本执行目录作为工作目录。`);
+        effectivePath = executionPath;
+      }
+      
+      if (effectivePath && effectivePath !== '/') {
+        const fileUri = `file://${effectivePath}`;
+        this.setWorkspaceRoots([fileUri]);
+        console.log(`🔍 最终设置workspace根目录为: ${effectivePath}`);
+      } else {
+        console.warn('⚠️ 无法确定有效的workspace根目录，请确保在正确的项目目录中运行');
       }
     }
   }
@@ -759,20 +770,19 @@ class IterationMCPServer {
       let checkUsers: UserInfo[] = [];
 
       try {
-        // 使用自动检测的工作目录
-        const workspaceRoot = this.config?.projectPath || process.cwd();
+        // 强制使用 getEffectiveWorkingDirectory() 确保目录的准确性
+        const workspaceRoot = this.getEffectiveWorkingDirectory();
 
         debugInfo += `🔧 使用工作目录: ${workspaceRoot}\n`;
-        // debugInfo += `🔧 调试 - config.projectPath: ${this.config?.projectPath}\n`;
-        // debugInfo += `🔧 调试 - process.cwd(): ${process.cwd()}\n`;
-        // debugInfo += `🔧 调试 - PWD环境变量: ${process.env.PWD}\n`;
-        // debugInfo += `🔧 调试 - INIT_CWD环境变量: ${process.env.INIT_CWD}\n`;
 
         // 使用GitUtils获取更准确的Git信息
         const gitUtils = new (await import("./git-utils.js")).GitUtils(
           workspaceRoot
         );
         const fullGitInfo = await gitUtils.getGitInfo();
+
+        // 将获取到的Git信息存储到会话中，以便下一步使用
+        this.sessionData.gitInfo = fullGitInfo;
 
         // 简单的目录名作为项目名（fallback）
         const projectName =
@@ -783,12 +793,6 @@ class IterationMCPServer {
         gitInfo.currentBranch = fullGitInfo.currentBranch;
         gitInfo.projectUrl = fullGitInfo.projectUrl;
         gitInfo.estimatedWorkDays = fullGitInfo.estimatedWorkDays; // 使用智能计算，fallback为7天
-
-        // debugInfo += `✅ 项目名称: ${projectName}\n`;
-        // debugInfo += `✅ 当前分支: ${gitInfo.currentBranch}\n`;
-        // debugInfo += `✅ 项目地址: ${gitInfo.projectUrl || '未获取到'}\n`;
-        // debugInfo += `✅ 智能预估工时: ${gitInfo.estimatedWorkDays} 天\n`;
-        // debugInfo += `✅ Git信息获取完成（使用GitUtils智能分析）\n`;
       } catch (error) {
         debugInfo += `❌ Git信息获取失败: ${error}\n`;
         // Git信息获取失败直接终止流程
@@ -864,32 +868,46 @@ class IterationMCPServer {
 
   private async handleProjectInfo(data: string) {
     try {
-      const projectInfo = JSON.parse(data);
-      
+      const userInput = JSON.parse(data);
+
+      // 从会话中获取自动检测到的Git信息
+      const autoDetectedInfo = {
+        gitProjectUrl: this.sessionData.gitInfo?.projectUrl,
+        gitProjectName: this.sessionData.gitInfo?.projectName,
+        developmentBranch: this.sessionData.gitInfo?.currentBranch,
+        workHours: this.sessionData.gitInfo?.estimatedWorkDays,
+      };
+
+      // 合并自动检测的信息和用户输入的信息
+      const projectInfo = {
+        ...autoDetectedInfo,
+        ...userInput,
+      };
+
       // 验证必填字段
       const required = [
         "gitProjectUrl",
         "gitProjectName",
         "developmentBranch",
         "productDoc",
-        'technicalDoc',
+        "technicalDoc",
       ];
       for (const field of required) {
         if (!projectInfo[field]) {
           throw new Error(`${field} 为必填项`);
         }
       }
-      
+
       // 保存用户输入的项目信息到会话存储
       this.sessionData.projectInfo = projectInfo;
-      
+
       // 更新缓存中的参与人员和复审人员
       const participantIds = projectInfo.participants || [];
       const checkUserIds = projectInfo.checkUsers || [];
       if (participantIds.length > 0 || checkUserIds.length > 0) {
         this.cacheManager.updateRecentPersonnel(participantIds, checkUserIds);
       }
-      
+
       return {
         content: [
           {
