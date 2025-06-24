@@ -47,7 +47,7 @@
 
 1. 在 Cursor 中调用 `check_login_status` 检查登录状态
 2. 如未登录，调用 `login_dingtalk` 进行扫码登录
-3. 登录成功后，使用 `create_iteration` 开始4步交互式流程
+3. 登录成功后，使用 `create_iteration` 开始5步交互式流程
 4. 使用 `submit_complete_iteration` 提交完整的迭代和CR申请单
 
 ## 👥 使用者指南（同事配置）
@@ -114,7 +114,7 @@
 
 ### 迭代管理工具  
 
-- `create_iteration`: 4步交互式迭代创建流程
+- `create_iteration`: 5步交互式迭代创建流程
 - `submit_complete_iteration`: 两阶段API提交
 
 ### 数据查询工具
@@ -123,7 +123,7 @@
 
 ## 📊 数据流程
 
-### 4步迭代创建流程
+### 5步迭代创建流程
 
 ```md
 Step 1: start
@@ -133,7 +133,9 @@ Step 1: start
 
 Step 2: basic_info  
 ├── 收集基础信息（项目线、迭代名称、上线时间）
-├── 自动获取Git信息（分支、项目名、预估工时）
+├── 自动检测工作目录 (MCP根目录机制)
+├── 自动获取Git信息（项目URL、分支、项目名）
+├── 智能计算预估工时（基于项目实际开发天数）
 └── 存储到 sessionData.basicInfo
 
 Step 3: project_info
@@ -144,7 +146,12 @@ Step 3: project_info
 Step 4: modules
 ├── 收集模块信息（组件模块、功能模块）
 ├── 组装完整迭代数据
-└── 生成JSON供提交使用
+└── 生成JSON数据预览供确认
+
+Step 5: submit (手动确认)
+├── 用户手动确认数据正确性
+├── 调用 submit_complete_iteration
+└── 两阶段API提交
 ```
 
 ### 两阶段提交流程
@@ -173,7 +180,7 @@ src/
 ├── api.ts           # API调用管理，HTTP请求封装
 ├── cache.ts         # 本地缓存管理，用户数据存储
 ├── dingtalk.ts      # 钉钉认证模块，扫码登录
-├── git-utils.ts     # Git信息工具，自动获取项目信息
+├── git-utils.ts     # Git信息工具，智能工时计算和项目信息获取
 └── types.ts         # TypeScript类型定义
 ```
 
@@ -232,6 +239,8 @@ src/
 
 ## 📚 配置说明
 
+### 全局配置
+
 项目使用内置配置管理，所有配置都在 `src/config.ts` 中：
 
 - **API 配置**：默认使用 `http://gw.fshows.com` 作为基础地址
@@ -239,6 +248,49 @@ src/
 - **接口端点**：所有 API 端点都已预配置
 
 如需修改 API 地址或端点，直接编辑 `src/config.ts` 文件。
+
+### 项目级配置文件 (iteration-mcp.config)
+
+工具支持在项目根目录创建 `iteration-mcp.config` 文件来配置项目特定信息：
+
+```bash
+# iteration-mcp.config
+git_project_url=https://github.com/username/project-name
+git_project_name=project-name
+workdir=/path/to/project
+```
+
+**配置优先级**：
+1. iteration-mcp.config 文件（推荐）
+2. git_info.config.json 文件（向后兼容）
+3. git remote 自动检测（fallback）
+
+### 工作目录检测机制
+
+工具使用MCP标准的roots机制自动检测工作目录：
+
+1. **MCP客户端提供的workspace roots**（最高优先级）
+2. 手动指定的workdir参数
+3. 环境变量 (PWD, INIT_CWD)
+4. process.cwd() (fallback)
+
+### 智能工时计算
+
+工具提供基于项目实际开发时间的智能工时计算：
+
+**主分支 (main/master)**：
+- 计算从第一次提交到当前时间的实际天数
+- 例如：项目从2025-06-22开始，到2025-06-24 = 2天
+
+**特性分支**：
+- 优先使用分支从主分支分离的时间点计算
+- 回退方案：使用分支第一次提交时间
+- 最终回退：基于最近提交活动估算
+
+**计算规则**：
+- 最小工时：1天（取消了原来不合理的3天限制）
+- 无上限限制（取消了原来的30天上限）
+- 基于实际时间跨度，而非提交数量
 
 ## 🚀 二次开发指南
 
@@ -292,11 +344,15 @@ src/
 - ✅ 基础 MCP Server 框架
 - ✅ 钉钉登录流程（二维码生成）
 - ✅ Token 本地存储管理
-- ✅ 完整的迭代创建和提交流程
+- ✅ 完整的5步迭代创建和提交流程
 - ✅ 项目内配置管理
 - ✅ 项目组选择功能
 - ✅ 用户列表管理
 - ✅ 两阶段API提交
+- ✅ MCP标准roots机制工作目录检测
+- ✅ iteration-mcp.config配置文件支持
+- ✅ 智能工时计算（基于实际开发时间）
+- ✅ 多格式配置文件读取（.config和.json）
 - ✅ 详细注释和文档
 
 ## 🎯 最佳实践
