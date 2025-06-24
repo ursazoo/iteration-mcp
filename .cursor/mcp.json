@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/Users/rabbitsbear/project/fshows/ts-mcp"
+      ],
+      "enabled": true
+    },
+    "local-iteration-mcp": {
+      "command": "npx",
+      "args": ["-y", "@asthestarslept/iteration-mcp"]
+    },
+    "iteration-mcp-v2": {
+        "name": "iteration-mcp-v2",
+        "command": "npx",
+        "args": [
+            "-y",
+            "@asthestarslept/iteration-mcp"
+        ],
+        "description": "用于创建和管理迭代的MCP工具"
+    }
+  }
+}

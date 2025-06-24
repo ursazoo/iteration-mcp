@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "/Users/rabbitsbear/project/fshows/ts-mcp"
+      ],
+      "enabled": true
+    },
+    "local-iteration-mcp": {
+      "command": "npx",
+      "args": ["-y", "@asthestarslept/iteration-mcp"]
+    },
+    "iteration-mcp-v2-with-workdir": {
+      "name": "iteration-mcp-v2-workdir",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@asthestarslept/iteration-mcp",
+        "--workdir",
+        "/Users/rabbitsbear/project/fshows/ts-mcp"
+      ],
+      "description": "用于创建和管理迭代的MCP工具（指定工作目录版本）",
+      "enabled": true
+    },
+    "iteration-mcp-v2-auto": {
+      "name": "iteration-mcp-v2-auto",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@asthestarslept/iteration-mcp"
+      ],
+      "description": "用于创建和管理迭代的MCP工具（自动检测版本）",
+      "enabled": false
+    }
+  }
+} 

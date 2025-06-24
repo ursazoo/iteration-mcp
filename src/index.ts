@@ -13,9 +13,38 @@
  * 工具链接的API系统：http://gw.fshows.com
  * 
  * @author MCP迭代管理工具团队
- * @version 1.0.1
+ * @version 1.0.5
  * @since 2024-12-23
  */
+
+// ==================== 命令行参数解析 ====================
+
+/**
+ * 解析命令行参数
+ * 支持格式：
+ * - --workdir /path/to/directory
+ * - --workdir=/path/to/directory
+ */
+function parseCommandLineArgs(): { workdir?: string } {
+  const args = process.argv.slice(2);
+  const result: { workdir?: string } = {};
+  
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--workdir' && i + 1 < args.length) {
+      result.workdir = args[i + 1];
+      console.log(`🎯 检测到命令行参数 --workdir: ${result.workdir}`);
+      i++; // 跳过下一个参数
+    } else if (args[i].startsWith('--workdir=')) {
+      result.workdir = args[i].substring('--workdir='.length);
+      console.log(`🎯 检测到命令行参数 --workdir=: ${result.workdir}`);
+    }
+  }
+  
+  return result;
+}
+
+// 解析命令行参数（在导入模块之前，确保早期执行）
+const cmdArgs = parseCommandLineArgs();
 
 // ==================== 核心依赖导入 ====================
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -94,13 +123,14 @@ class IterationMCPServer {
    * 2. 加载配置文件
    * 3. 初始化缓存管理器
    * 4. 设置请求处理器
+   * 5. 处理命令行参数指定的工作目录
    */
   constructor() {
     // ==================== 创建MCP服务器 ====================
     this.server = new Server(
       {
         name: 'iteration-mcp-v2',        // 工具名称
-        version: '1.0.1'                // 工具版本
+        version: '1.0.5'                // 工具版本
       },
       {
         capabilities: {
@@ -127,8 +157,17 @@ class IterationMCPServer {
     // 设置MCP请求处理器
     this.setupHandlers();
     
-    // 初始化workspace根目录
-    this.initializeWorkspaceRoots();
+    // ==================== 处理工作目录配置 ====================
+    // 优先级：命令行参数 > MCP workspace roots > 环境变量 > process.cwd()
+    if (cmdArgs.workdir) {
+      console.log(`🎯 使用命令行指定的工作目录: ${cmdArgs.workdir}`);
+      this.config.projectPath = cmdArgs.workdir;
+      this.setWorkspaceRoots([`file://${cmdArgs.workdir}`]);
+    } else {
+      console.log('🔍 未指定命令行工作目录，使用自动检测机制');
+      // 初始化workspace根目录（现有逻辑）
+      this.initializeWorkspaceRoots();
+    }
   }
 
   /**
@@ -519,9 +558,10 @@ class IterationMCPServer {
   /**
    * 自动检测工作目录
    * 优先级：
-   * 1. 手动传递的workdir参数（最高优先级）
-   * 2. 环境变量（PWD、INIT_CWD等）
-   * 3. 进程当前目录process.cwd()（最低优先级）
+   * 1. 命令行参数 --workdir （最高优先级，已在构造函数中处理）
+   * 2. 手动传递的workdir参数
+   * 3. 环境变量（PWD、INIT_CWD等）
+   * 4. 进程当前目录process.cwd()（最低优先级）
    * 
    * @param manualWorkdir 手动传递的工作目录
    * @returns 检测到的工作目录路径
@@ -730,8 +770,11 @@ class IterationMCPServer {
         // 使用自动检测的工作目录（已在handleCreateIteration中设置）
         const workspaceRoot = this.config?.projectPath || process.cwd();
         debugInfo += `🔧 使用工作目录: ${workspaceRoot}\n`;
-        debugInfo += `🔧 config.projectPath: ${this.config?.projectPath}\n`;
-        debugInfo += `🔧 process.cwd(): ${process.cwd()}\n`;
+        debugInfo += `🔧 调试 - config.projectPath: ${this.config?.projectPath}\n`;
+        debugInfo += `🔧 调试 - process.cwd(): ${process.cwd()}\n`;
+        debugInfo += `🔧 调试 - __dirname: ${__dirname}\n`;
+        debugInfo += `🔧 调试 - PWD环境变量: ${process.env.PWD}\n`;
+        debugInfo += `🔧 调试 - INIT_CWD环境变量: ${process.env.INIT_CWD}\n`;
         
         // 检查目录是否存在
         const fs = await import('fs');
