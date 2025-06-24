@@ -950,22 +950,25 @@ class IterationMCPServer {
         crApplication: {
           projectInfo: {
             projectName: this.sessionData.projectInfo.gitProjectName,
-            participants: this.sessionData.projectInfo.participants || [],
-            checkUsers: this.sessionData.projectInfo.reviewers || [],
-            startDate: new Date().toISOString().split('T')[0],
+            participantIds:
+              this.sessionData.projectInfo.participants || [].join(","),
+            checkUserIds:
+              this.sessionData.projectInfo.reviewers || [].join(","),
+            startDate: new Date().toISOString().split("T")[0],
             endDate: this.sessionData.basicInfo.onlineTime,
-            description: this.sessionData.projectInfo.remarks || '',
-            productDoc: this.sessionData.projectInfo.productDoc || '',
-            technicalDoc: this.sessionData.projectInfo.technicalDoc || '',
-            projectDashboard: this.sessionData.projectInfo.projectDashboard || '',
-            designDoc: this.sessionData.projectInfo.designDoc || '',
+            description: this.sessionData.projectInfo.remarks || "",
+            productDoc: this.sessionData.projectInfo.productDoc || "",
+            technicalDoc: this.sessionData.projectInfo.technicalDoc || "",
+            projectDashboard:
+              this.sessionData.projectInfo.projectDashboard || "",
+            designDoc: this.sessionData.projectInfo.designDoc || "",
             gitProjectUrl: this.sessionData.projectInfo.gitProjectUrl,
             developmentBranch: this.sessionData.projectInfo.developmentBranch,
-            workHours: this.sessionData.projectInfo.workHours || 0
+            workHours: this.sessionData.projectInfo.workHours || 0,
           },
           componentModules: modules.componentModules,
-          functionModules: modules.functionModules
-        }
+          functionModules: modules.functionModules,
+        },
       };
       
       return {

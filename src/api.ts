@@ -117,19 +117,19 @@ export class APIManager {
     }));
     
     return {
-      reqDocUrl: projectInfo.productDoc || '-',
-      techDocUrl: projectInfo.technicalDoc || '-',
-      projexUrl: projectInfo.projectDashboard || '-',
-      uxDocUrl: projectInfo.designDoc || '-',
-      gitlabUrl: projectInfo.gitProjectUrl || '',
-      gitProjectName: projectInfo.projectName || '',
-      gitlabBranch: projectInfo.developmentBranch || 'main',
-      participantIds: Array.isArray(projectInfo.participants) ? projectInfo.participants.join(',') : '',
-      checkUserIds: Array.isArray(projectInfo.reviewers) ? projectInfo.reviewers.join(',') : '',
+      reqDocUrl: projectInfo.productDoc || "-",
+      techDocUrl: projectInfo.technicalDoc || "-",
+      projexUrl: projectInfo.projectDashboard || "-",
+      uxDocUrl: projectInfo.designDoc || "-",
+      gitlabUrl: projectInfo.gitProjectUrl || "",
+      gitProjectName: projectInfo.projectName || "",
+      gitlabBranch: projectInfo.developmentBranch || "main",
+      participantIds: projectInfo.participantIds || "",
+      checkUserIds: projectInfo.checkUserIds || "",
       spendTime: (projectInfo.workHours || 0).toString(),
       componentList,
       functionList,
-      sprintId: 0 // 将在createCRApplication中设置
+      sprintId: 0, // 将在createCRApplication中设置
     };
   }
 

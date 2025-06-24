@@ -74,7 +74,7 @@
   ```json
   {
     "api": {
-      "baseUrl": "http://gw.fshows.com"
+      "baseUrl": "http://xx.xxxxx.com"
     },
     "auth": {
       "Authorization": "Bearer your_personal_token_here"
@@ -95,11 +95,17 @@
       "command": "npx",
       "args": [
           "-y",
-          "@asthestarslept/iteration-mcp"
+          "@asthestarslept/iteration-mcp",
+          "--workdir",
+          "/path/to/your/project"
       ],
       "description": "用于创建和管理迭代的MCP工具"
   }
   ```
+  
+  > **重要提示**: 请将 `/path/to/your/project` 替换为您实际项目的绝对路径，例如：
+  > - macOS/Linux: `/Users/yourname/projects/your-project-name`
+  > - Windows: `C:\\Users\\yourname\\projects\\your-project-name`
   
 - **保存并重启**: 保存文件，然后**重启Cursor**以加载新工具。
 
@@ -243,7 +249,6 @@ src/
 
 项目使用内置配置管理，所有配置都在 `src/config.ts` 中：
 
-- **API 配置**：默认使用 `http://gw.fshows.com` 作为基础地址
 - **钉钉配置**：需要在代码中配置实际的 appId 和 appSecret
 - **接口端点**：所有 API 端点都已预配置
 
